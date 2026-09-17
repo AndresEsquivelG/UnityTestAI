@@ -1,10 +1,10 @@
 /**
- * Contrato de adaptación del núcleo — HU-01.
+ * Contrato de adaptación del núcleo.
  *
  * Punto de entrada único: el núcleo importa de "core/contracts" y nunca de un
- * módulo de adaptador, que es el criterio de aceptación de HU-01.
+ * módulo de adaptador.
  *
- * Trazabilidad con la Tabla 10 del anteproyecto:
+ * Correspondencia entre las operaciones de la interfaz y sus tipos:
  *
  *   OP-01  Descriptor                    → AdapterDescriptor          identity.ts
  *   OP-02  Aplicabilidad                 → ApplicabilityResult        identity.ts
@@ -18,19 +18,26 @@
  *   OP-10  Especificación de artefacto   → ArtifactSpec               materialization.ts
  *   OP-11  Código normalizado            → string                     materialization.ts
  *   OP-12  Lista de incumplimientos      → PreconditionViolation[]    materialization.ts
- *   OP-13  Resultado de compilación (op) → CompilationResult          verification.ts
+ *   OP-13  Resultado de verificación(op) → VerificationResult         verification.ts
  *   OP-14  Resultado de ejecución   (op) → TestExecutionResult        verification.ts
  *   OP-15  Informe de cobertura     (op) → CoverageReport             verification.ts
  *   OP-16  Ciclo de vida            (op) → void                       ecosystemAdapter.ts
  *
- * (op) = operación opcional según la columna "Oblig." de la Tabla 10.
+ * (op) = operación opcional: el adaptador puede no implementarla.
+ *
+ * OP-13 se nombra verificación y no compilación porque en un ecosistema
+ * interpretado la etapa equivalente comprueba sintaxis e importabilidad; qué
+ * clase de verificación ofrece cada adaptador lo declara
+ * `CapabilityMap.verification`.
  */
 
 export type {
   AdapterDescriptor,
   ApplicabilityResult,
   CapabilityMap,
+  DetectionContext,
   OptionalOperation,
+  VerificationKind,
 } from "./identity";
 
 export type {
@@ -60,7 +67,6 @@ export type {
 } from "./materialization";
 
 export type {
-  CompilationResult,
   CoverageMetric,
   CoverageReport,
   Diagnostic,
@@ -68,21 +74,22 @@ export type {
   FileCoverage,
   TestExecutionResult,
   TestFailure,
+  VerificationResult,
 } from "./verification";
 
 export type { UnitTarget } from "./target";
 
 export type {
-  CompilingAdapter,
   CoverageAdapter,
   EcosystemAdapter,
   SchemaExtendingAdapter,
   TestRunningAdapter,
+  VerifyingAdapter,
 } from "./ecosystemAdapter";
 
 export {
-  supportsCompilation,
   supportsCoverage,
   supportsSchemaExtension,
   supportsTestRun,
+  supportsVerification,
 } from "./ecosystemAdapter";

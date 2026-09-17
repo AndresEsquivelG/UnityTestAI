@@ -1,32 +1,29 @@
 /**
- * Bloque Verificación de la interfaz de adaptación — OP-13, OP-14 y OP-15
- * (Tabla 10). Las tres operaciones son OPCIONALES.
+ * Bloque Verificación de la interfaz de adaptación — OP-13, OP-14 y OP-15.
+ * Las tres operaciones son OPCIONALES.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * FIRMAS PROVISIONALES
  *
  * Estos tres tipos son los únicos de la interfaz que no se derivaron de código
- * existente: en el pipeline actual no hay ninguna invocación de compilación,
- * de ejecución de pruebas ni de recolección de cobertura. Se derivaron de los
- * criterios de aceptación de HU-12, HU-13 y HU-14, que describen la salida
- * esperada pero no su forma.
+ * existente: en el pipeline actual no hay ninguna invocación de compilación, de
+ * ejecución de pruebas ni de recolección de cobertura. Se diseñaron a partir de
+ * la salida que se espera de cada herramienta, no de su observación.
  *
- * HU-41 (caracterización manual de las cadenas de herramientas de Java y
- * Python) es la historia que debe respaldarlos con observaciones reales de
- * Maven, Gradle, JaCoCo y pytest. Hasta entonces, este archivo es el que debe
- * revisarse primero ante cualquier discrepancia.
+ * Antes de darlos por buenos hay que contrastarlos con corridas reales de las
+ * cadenas de herramientas de cada ecosistema —Maven, Gradle, JaCoCo, pytest—
+ * y con los archivos estructurados que producen. Hasta entonces, este archivo
+ * es el primero que debe revisarse ante cualquier discrepancia.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 export type DiagnosticSeverity = "error" | "warning";
 
 /**
- * Diagnóstico normalizado de compilación.
+ * Diagnóstico normalizado de la verificación.
  *
- * HU-12 exige presentar el resultado "con los diagnósticos normalizados por
- * archivo y línea", y HU-35 exige realimentar los errores reales de
- * compilación al agente de corrección: el mensaje crudo no basta, hace falta
- * la ubicación.
+ * Lleva archivo y línea porque el mensaje crudo no basta para presentar el
+ * resultado ni para realimentar el error al agente de corrección.
  */
 export interface Diagnostic {
   /** Ruta relativa a `ProjectModel.rootPath`. */
@@ -41,8 +38,19 @@ export interface Diagnostic {
   readonly message: string;
 }
 
-/** OP-13 — Resultado de compilación. */
-export interface CompilationResult {
+/**
+ * OP-13 — Resultado de la verificación previa del artefacto.
+ *
+ * No se llama resultado de compilación porque no siempre hay compilación: en un
+ * ecosistema interpretado la etapa equivalente comprueba que el artefacto sea
+ * sintácticamente válido y se pueda importar. Qué clase de verificación se
+ * ejecutó lo declara `CapabilityMap.verification`.
+ *
+ * La forma del resultado es la misma en los tres ecosistemas, y por eso los
+ * diagnósticos se pueden realimentar al agente de corrección con el mismo
+ * código, sin importar qué herramienta los produjo.
+ */
+export interface VerificationResult {
   readonly succeeded: boolean;
   readonly diagnostics: readonly Diagnostic[];
   readonly exitCode: number;
@@ -62,8 +70,8 @@ export interface TestFailure {
 /**
  * OP-14 — Resultado de ejecución.
  *
- * Los cuatro contadores son los que HU-13 exige mostrar en la interfaz:
- * "el total de pruebas, exitosas, fallidas y omitidas".
+ * Los cuatro contadores son los que la interfaz presenta al terminar una
+ * corrida: total, exitosas, fallidas y omitidas.
  */
 export interface TestExecutionResult {
   readonly total: number;
@@ -93,13 +101,11 @@ export interface FileCoverage {
 }
 
 /**
- * OP-15 — Informe de cobertura.
+ * OP-15 — Informe de cobertura, global y por archivo.
  *
- * HU-14 exige el porcentaje "de línea y de decisión, global y por archivo".
- * La cobertura de decisión es opcional porque HU-29 —cobertura de decisión en
- * Python— está declarada como holgura de la épica E4 y es la primera historia
- * que se sacrifica si el cronograma se ajusta: el tipo tiene que admitir un
- * adaptador que entregue solo cobertura de línea.
+ * La cobertura de decisión es opcional porque no todas las herramientas la
+ * entregan, y algunas solo si se activa expresamente: el tipo tiene que admitir
+ * un adaptador que entregue únicamente cobertura de línea.
  */
 export interface CoverageReport {
   readonly line: CoverageMetric;

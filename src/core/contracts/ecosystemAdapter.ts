@@ -2,6 +2,7 @@ import type {
   AdapterDescriptor,
   ApplicabilityResult,
   CapabilityMap,
+  DetectionContext,
 } from "./identity";
 import type { ProjectModel } from "./discovery";
 import type { UnitTarget } from "./target";
@@ -18,35 +19,32 @@ import type {
   PreconditionViolation,
 } from "./materialization";
 import type {
-  CompilationResult,
   CoverageReport,
   TestExecutionResult,
+  VerificationResult,
 } from "./verification";
 
 /**
- * Interfaz de adaptación: las dieciséis operaciones comunes a todo ecosistema
- * (OP-01 a OP-16, Tabla 10). Es el entregable de HU-01.
+ * Interfaz de adaptación: las dieciséis operaciones comunes a todo ecosistema,
+ * OP-01 a OP-16.
  *
  * DIVISIÓN OBLIGATORIA / OPCIONAL
  *
  * Las once operaciones obligatorias son miembros requeridos. Las cinco
- * opcionales —OP-09, OP-13, OP-14, OP-15 y OP-16— son miembros opcionales de
- * la interfaz, además de estar declaradas en `capabilities`. La doble
- * declaración es deliberada:
+ * opcionales —OP-09, OP-13, OP-14, OP-15 y OP-16— son miembros opcionales de la
+ * interfaz, además de estar declaradas en `capabilities`. La doble declaración
+ * es deliberada:
  *
- *   · el miembro opcional permite que un adaptador incompleto compile, que es
- *     lo que HU-42 necesita para el adaptador ficticio;
+ *   · el miembro opcional permite que un adaptador incompleto compile;
  *   · `capabilities` permite al núcleo decidir si omite una etapa sin invocar
- *     nada ni inspeccionar el objeto, que es lo que HU-05 exige para omitir la
- *     etapa y reportarla como no aplicable en lugar de abortar.
+ *     nada ni inspeccionar el objeto.
  *
- * Que ambas coincidan es un invariante de tiempo de ejecución que no puede
- * expresarse en el sistema de tipos. Verificarlo es responsabilidad de la
- * suite de pruebas de contrato de HU-38.
+ * Que ambas coincidan es un invariante de tiempo de ejecución que el sistema de
+ * tipos no puede expresar; comprobarlo corresponde a las pruebas de contrato.
  *
  * El núcleo no debe consultar `descriptor.id` para decidir su comportamiento:
- * hacerlo reintroduce la condición por ecosistema que HU-06 prohíbe. El
- * identificador es para registro, presentación y trazas.
+ * hacerlo reintroduce la condición por ecosistema que esta interfaz existe para
+ * eliminar. El identificador es para registro, presentación y trazas.
  */
 export interface EcosystemAdapter {
   // ── Identidad ────────────────────────────────────────────────────────────
@@ -61,7 +59,7 @@ export interface EcosystemAdapter {
    * OP-02 — Detección de aplicabilidad a partir de los marcadores de raíz.
    * No debe lanzar: un proyecto ajeno se reporta con `applicable: false`.
    */
-  detectApplicability(rootPath: string): Promise<ApplicabilityResult>;
+  detectApplicability(context: DetectionContext): Promise<ApplicabilityResult>;
 
   // ── Descubrimiento ───────────────────────────────────────────────────────
 
@@ -87,8 +85,16 @@ export interface EcosystemAdapter {
 
   // ── Generación ───────────────────────────────────────────────────────────
 
-  /** OP-08 — Perfil de prompt con el conocimiento propio del ecosistema. */
-  readonly promptProfile: PromptProfile;
+  /**
+   * OP-08 — Perfil de prompt con el conocimiento propio del ecosistema, ya
+   * resuelto para este proyecto.
+   *
+   * Es una operación y no una propiedad porque el perfil depende del proyecto
+   * descubierto y no solo del ecosistema; la justificación está en
+   * `PromptProfile`. Es síncrona: todo lo que exija leer el disco se averigua en
+   * OP-04 y viaja en `ProjectModel.adapterData`.
+   */
+  getPromptProfile(project: ProjectModel): PromptProfile;
 
   /**
    * OP-09 — Extensión del esquema de análisis. OPCIONAL.
@@ -116,13 +122,17 @@ export interface EcosystemAdapter {
     spec: ArtifactSpec
   ): Promise<readonly PreconditionViolation[]>;
 
-  // ── Verificación (firmas provisionales, pendientes de HU-41) ─────────────
+  // ── Verificación (firmas provisionales: ver verification.ts) ─────────────
 
   /**
-   * OP-13 — Compilación del proyecto incluyendo el artefacto generado. OPCIONAL.
-   * Presente si y solo si `capabilities.compile` es true.
+   * OP-13 — Verificación previa del artefacto generado. OPCIONAL.
+   * Presente si y solo si `capabilities.verification` no es "none".
+   *
+   * Es compilación cuando el ecosistema la contempla y comprobación de
+   * importabilidad cuando no. El núcleo la invoca igual en ambos casos: la
+   * diferencia se declara, no se programa.
    */
-  compile?(project: ProjectModel): Promise<CompilationResult>;
+  verifyArtifact?(project: ProjectModel): Promise<VerificationResult>;
 
   /**
    * OP-14 — Ejecución de las pruebas generadas. OPCIONAL.
@@ -157,13 +167,12 @@ export interface EcosystemAdapter {
 
 // ── Guardas de capacidad ───────────────────────────────────────────────────
 //
-// Permiten al núcleo estrechar el tipo del adaptador sin escribir una sola
-// condición por ecosistema, que es la forma que HU-05 exige y que HU-06
-// verifica por análisis estático.
+// Permiten al núcleo estrechar el tipo del adaptador antes de invocar una
+// operación opcional, sin escribir una sola condición por ecosistema.
 
-/** Adaptador que sí puede compilar (OP-13). */
-export type CompilingAdapter = EcosystemAdapter &
-  Required<Pick<EcosystemAdapter, "compile">>;
+/** Adaptador que sí verifica el artefacto antes de ejecutarlo (OP-13). */
+export type VerifyingAdapter = EcosystemAdapter &
+  Required<Pick<EcosystemAdapter, "verifyArtifact">>;
 
 /** Adaptador que sí puede ejecutar pruebas (OP-14). */
 export type TestRunningAdapter = EcosystemAdapter &
@@ -177,8 +186,13 @@ export type CoverageAdapter = EcosystemAdapter &
 export type SchemaExtendingAdapter = EcosystemAdapter &
   Required<Pick<EcosystemAdapter, "extendAnalysisSchema">>;
 
-export function supportsCompilation(a: EcosystemAdapter): a is CompilingAdapter {
-  return a.capabilities.compile && typeof a.compile === "function";
+/**
+ * La guarda no distingue compilación de comprobación de importabilidad: para el
+ * núcleo son la misma etapa. Esa diferencia es de presentación y se lee en
+ * `capabilities.verification`.
+ */
+export function supportsVerification(a: EcosystemAdapter): a is VerifyingAdapter {
+  return a.capabilities.verification !== "none" && typeof a.verifyArtifact === "function";
 }
 
 export function supportsTestRun(a: EcosystemAdapter): a is TestRunningAdapter {

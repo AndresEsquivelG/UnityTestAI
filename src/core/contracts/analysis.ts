@@ -1,13 +1,12 @@
 /**
- * Bloque Análisis de la interfaz de adaptación — OP-05, OP-06 y OP-07 (Tabla 10).
+ * Bloque Análisis de la interfaz de adaptación — OP-05, OP-06 y OP-07.
  */
 
 /**
  * Candidata a declaración de la unidad bajo prueba.
  *
- * `signature` existe porque HU-16 exige, ante métodos sobrecargados, presentar
- * las firmas disponibles y permitir elegir; la ubicación devuelta debe
- * corresponder a la declaración seleccionada.
+ * `signature` existe porque ante métodos sobrecargados hay que poder presentar
+ * las firmas disponibles y devolver la ubicación de la que se elija.
  */
 export interface SymbolCandidate {
   /** Ruta relativa a `ProjectModel.rootPath`. */
@@ -23,20 +22,20 @@ export interface SymbolCandidate {
 /**
  * OP-05 — Ubicación del símbolo.
  *
- * El tipo es una unión discriminada y no un par de banderas porque HU-09 exige
- * distinguir la declaración de la invocación: dado un archivo que invoca un
- * método sin declararlo, el framework debe informar que no se localizó la
- * declaración y no iniciar el pipeline.
+ * El tipo es una unión discriminada y no un par de banderas porque hay que
+ * distinguir la declaración de la invocación: un archivo que invoca un método
+ * sin declararlo tiene que reportarse como no localizado, antes de iniciar el
+ * pipeline y de gastar tokens.
  *
  * Hoy esta operación es `checkSymbols`, en el núcleo, y devuelve
- * `{ classOk, methodOk }` a partir de dos expresiones regulares
- * insensibles a mayúsculas que casan también con las invocaciones. Ese es
- * exactamente el falso positivo que HU-09 corrige.
+ * `{ classOk, methodOk }` a partir de dos expresiones regulares insensibles a
+ * mayúsculas que casan también con las invocaciones. Ese es el falso positivo
+ * que esta forma corrige.
  */
 export type SymbolLocation =
   | {
       readonly found: true;
-      /** Al menos una candidata. Más de una solo cuando hay sobrecarga (HU-16). */
+      /** Al menos una candidata. Más de una solo cuando hay sobrecarga. */
       readonly candidates: readonly [SymbolCandidate, ...SymbolCandidate[]];
     }
   | {
@@ -56,9 +55,9 @@ export interface SourceText {
  * OP-07 — Resolución de una referencia lógica de dependencia a su ruta física.
  *
  * `triedPaths` se conserva en el caso negativo porque es el único dato que
- * permite diagnosticar una resolución fallida. HU-22 exige resolver las
- * dependencias de Java por paquete, donde la traducción de nombre lógico a
- * ruta física admite varias rutas candidatas.
+ * permite diagnosticar una resolución fallida: traducir un nombre lógico a una
+ * ruta admite varias candidatas, como cuando un paquete se corresponde con una
+ * jerarquía de carpetas.
  *
  * Hoy esta operación está duplicada en el núcleo, en `readDependencyFiles`
  * (src/agents/codeAnalyzer.ts) y en `getClassContents`
