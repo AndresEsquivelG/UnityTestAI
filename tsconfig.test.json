@@ -1,0 +1,25 @@
+{
+	/*
+	 * Compilación de las pruebas.
+	 *
+	 * El proyecto se empaqueta con webpack, que resuelve los módulos por su
+	 * cuenta; las pruebas, en cambio, las ejecuta Node directamente, así que
+	 * necesitan módulos CommonJS y la resolución clásica.
+	 *
+	 * Solo se compila lo que las pruebas ejercitan. El resto de la extensión
+	 * depende del editor y de paquetes que solo webpack resuelve.
+	 */
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"module": "commonjs",
+		"moduleResolution": "node",
+		"outDir": "out-test",
+		"sourceMap": false,
+		"esModuleInterop": true
+	},
+	"include": [
+		"src/test/**/*.ts",
+		"src/adapters/**/*.ts",
+		"src/core/**/*.ts"
+	]
+}
