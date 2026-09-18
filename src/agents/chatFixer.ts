@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { buildChatFixerPrompt } from "../prompts/promptBuilder";
+import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -21,6 +22,8 @@ export type ChatFixerOutput = z.infer<typeof chatFixerOutputSchema>;
 // ── Input ──────────────────────────────────────────────────────────────────────
 
 export interface ChatFixerInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   testCode: string;
   assembledContext: string;
   userMessage: string;
@@ -53,6 +56,7 @@ export async function runChatFixer(
   fs.mkdirSync(dumpDir, { recursive: true });
 
   const prompt = buildChatFixerPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.assembledContext,

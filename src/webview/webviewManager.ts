@@ -5,7 +5,14 @@ import { collectClassAndMethod } from "../collectInputs";
 import { ChatSession } from "../llm/sessionManager";
 import { generateWithChatGPT, generateWithOllama, generateWithClaude } from "../llm";
 import type { ActiveEcosystem } from "../core/adapters";
-import type { ArtifactSpec, ProjectModel, SymbolCandidate, UnitTarget } from "../core/contracts";
+import { supportsSchemaExtension } from "../core/contracts";
+import type {
+  ArtifactSpec,
+  ProjectModel,
+  PromptProfile,
+  SymbolCandidate,
+  UnitTarget,
+} from "../core/contracts";
 import {
   dependencyLabel,
   describeViolations,
@@ -19,7 +26,8 @@ import { runDependencyResolver } from "../agents/dependencyResolver";
 import { runContextBuilder } from "../agents/contextBuilder";
 import { runContextValidator, runTestValidator } from "../agents/validator";
 import { runTestGenerator } from "../agents/testGenerator";
-import { runCodeAnalyzer, type CodeAnalyzerOutput } from "../agents/codeAnalyzer";
+import { runCodeAnalyzer } from "../agents/codeAnalyzer";
+import { formatCodeAnalysis } from "../agents/analysisText";
 import { runChatFixer } from "../agents/chatFixer";
 import { saveAgentOutput } from "../agents/agentOutputSaver";
 
@@ -48,6 +56,8 @@ type TestContext = {
   savedPath: string;
   /** Especificación con la que se escribió, para volver a normalizar (OP-11). */
   spec: ArtifactSpec;
+  /** Perfil de la corrida, para que el corrector componga el mismo prompt. */
+  profile: PromptProfile;
 };
 const testContextByPanel = new WeakMap<vscode.WebviewPanel, TestContext>();
 
@@ -127,102 +137,6 @@ function samePath(a: string, b: string): boolean {
     return left.toLowerCase() === right.toLowerCase();
   }
   return left === right;
-}
-
-function formatCodeAnalysis(analysis: CodeAnalyzerOutput): string {
-  if (analysis.status !== "READY") return "";
-
-  const { methodSummary, decisionTable, loops, sideEffects, dependencies, privateMembers, startAwakeFields, requiredUsings, untestableBranches, preFlightChecklist } = analysis;
-  const lines: string[] = [];
-
-  const params = methodSummary.inputs.map(i => `${i.type} ${i.name}`).join(", ");
-  lines.push(`Method: ${methodSummary.name}(${params}) → ${methodSummary.output}`);
-
-  if (decisionTable.length > 0) {
-    lines.push("\nDecision Table:");
-    for (const row of decisionTable) {
-      lines.push(`  [${row.branch.toUpperCase()}] ${row.conditions.join(" && ")} → ${row.expectedBehavior}`);
-    }
-  }
-
-  if (loops.length > 0) {
-    lines.push("\nLoops:");
-    for (const loop of loops) {
-      lines.push(`  ${loop.type}(${loop.condition})`);
-    }
-  }
-
-  if (sideEffects.length > 0) {
-    lines.push("\nSide Effects: " + sideEffects.join("; "));
-  }
-
-  if (dependencies.length > 0) {
-    lines.push("\nDependencies:");
-    for (const dep of dependencies) {
-      lines.push(`  ${dep.type} ${dep.name}: [${dep.membersUsed.join(", ")}]`);
-    }
-  }
-
-  if (privateMembers && privateMembers.length > 0) {
-    lines.push("\nPrivate Members (require Reflection):");
-    for (const m of privateMembers) {
-      if (m.kind === "nestedType" && m.nestedValues && m.nestedValues.length > 0) {
-        lines.push(`  [${m.kind}] ${m.type} ${m.name} — values: ${m.nestedValues.join(", ")}`);
-      } else {
-        lines.push(`  [${m.kind}] ${m.type} ${m.name}`);
-      }
-    }
-  }
-
-  if (startAwakeFields && startAwakeFields.length > 0) {
-    lines.push("\nFields initialized in Start/Awake (must init via Reflection in SetUp):");
-    for (const f of startAwakeFields) {
-      const note = f.notes ? ` — ${f.notes}` : "";
-      lines.push(`  ${f.type} ${f.name} [${f.initIn}]${note}`);
-    }
-  }
-
-  if (requiredUsings && requiredUsings.length > 0) {
-    lines.push("\nRequired project namespace usings (add to test file):");
-    for (const ns of requiredUsings) {
-      lines.push(`  using ${ns};`);
-    }
-  }
-
-  if (untestableBranches && untestableBranches.length > 0) {
-    lines.push("\nUNTESTABLE BRANCHES — OMIT these entirely, do NOT write Assert.Pass() placeholders:");
-    for (const b of untestableBranches) {
-      lines.push(`  SKIP: ${b.condition} — ${b.reason}`);
-    }
-  }
-
-  if (preFlightChecklist) {
-    lines.push("\n━━ PRE-FLIGHT CHECKLIST — use as ground truth, do NOT re-derive ━━");
-
-    if (preFlightChecklist.typeInstantiations.length > 0) {
-      lines.push("\nType Instantiations:");
-      for (const t of preFlightChecklist.typeInstantiations) {
-        if (t.pattern === "AddComponent") {
-          lines.push(`  ${t.typeName} → go.SetActive(false); go.AddComponent<${t.typeName}>()  [${t.reason}]`);
-        } else if (t.parameterless) {
-          lines.push(`  ${t.typeName} → new ${t.typeName}()  [${t.reason}]`);
-        } else {
-          const note = t.constructorNotes ? `  NOTE: ${t.constructorNotes}` : "";
-          lines.push(`  ${t.typeName} → new ${t.constructorSignature}  [${t.reason}]${note}`);
-        }
-      }
-    }
-
-    if (preFlightChecklist.computedProperties.length > 0) {
-      lines.push("\nComputed Properties (GetField returns null — set underlying data instead):");
-      for (const p of preFlightChecklist.computedProperties) {
-        lines.push(`  ${p.propertyName}: ${p.getterSummary}`);
-        lines.push(`    → Control via: ${p.controlVia}`);
-      }
-    }
-  }
-
-  return lines.join("\n");
 }
 
 function buildFullContext(
@@ -332,13 +246,26 @@ async function handleGenerate(
     // ── OP-06: código de la unidad ───────────────────────────────────────────
     const targetCode = await readTargetCode(ecosystem, project, editor, targetLocation);
 
+    // ── OP-08: perfil con el que se componen las plantillas neutras ──────────
+    // Se pide una sola vez por corrida: depende del proyecto descubierto y ese
+    // no cambia a mitad del pipeline.
+    const profile = adapter.getPromptProfile(project);
+
+    // ── OP-09: extensión del esquema de análisis, si el adaptador la ofrece ──
+    // Se pregunta por la capacidad declarada, nunca por el identificador del
+    // ecosistema. Un adaptador que no la declare recorre el mismo camino con la
+    // extensión ausente, sin ninguna condición más.
+    const analysisSchema = supportsSchemaExtension(adapter)
+      ? adapter.extendAnalysisSchema()
+      : undefined;
+
     // ── Step 0: Method Slicer ──────────────────────────────────────────────
     let codeSlice: string;
     if (reduceContext) {
       const slicerAgent = "Method Slicer";
       notifyAgent(panel, slicerAgent, "running");
       const slicerResult = await runMethodSlicer(
-        { code: targetCode, className, methodName, workspaceRoot: outputRoot },
+        { profile, code: targetCode, className, methodName, workspaceRoot: outputRoot },
         (prompt) => handler(prompt, panel, subModel ?? undefined)
       );
       saveAgentOutput(outputRoot, "method-slicer", slicerResult);
@@ -358,7 +285,7 @@ async function handleGenerate(
     const depAgent = "Dependency Resolver";
     notifyAgent(panel, depAgent, "running");
     const depResult = await runDependencyResolver(
-      { codeSlice, projectTree, className, methodName, workspaceRoot: outputRoot },
+      { profile, codeSlice, projectTree, className, methodName, workspaceRoot: outputRoot },
       (prompt) => handler(prompt, panel, subModel ?? undefined)
     );
     saveAgentOutput(outputRoot, "dependency-resolver", depResult);
@@ -389,6 +316,7 @@ async function handleGenerate(
       notifyAgent(panel, ctxAgent, "running");
       const ctxResult = await runContextBuilder(
         {
+          profile,
           codeSlice,
           dependencyFiles: depReferences,
           resolvedDependencyCode: dependencies.code,
@@ -427,7 +355,7 @@ async function handleGenerate(
     const ctxValAgent = "Context Validator";
     notifyAgent(panel, ctxValAgent, "running");
     const ctxValResult = await runContextValidator(
-      { assembledContext: preValidationContext, className, methodName, workspaceRoot: outputRoot, fullContext: !reduceContext },
+      { profile, assembledContext: preValidationContext, className, methodName, workspaceRoot: outputRoot, fullContext: !reduceContext },
       (prompt) => handler(prompt, panel, subModel ?? undefined)
     );
     saveAgentOutput(outputRoot, "validator-context", ctxValResult);
@@ -447,7 +375,14 @@ async function handleGenerate(
     const codeAnalyzerAgent = "Code Analyzer";
     notifyAgent(panel, codeAnalyzerAgent, "running");
     const codeAnalyzerResult = await runCodeAnalyzer(
-      { assembledContext, className, methodName, workspaceRoot: outputRoot },
+      {
+        profile,
+        schemaFields: analysisSchema?.fields,
+        assembledContext,
+        className,
+        methodName,
+        workspaceRoot: outputRoot,
+      },
       (prompt) => handler(prompt, panel, subModel ?? undefined)
     );
     saveAgentOutput(outputRoot, "code-analyzer", codeAnalyzerResult);
@@ -455,7 +390,7 @@ async function handleGenerate(
     // Soft failure: log and continue without the pre-computed analysis
     const codeAnalysis =
       codeAnalyzerResult.status === "READY"
-        ? formatCodeAnalysis(codeAnalyzerResult)
+        ? formatCodeAnalysis(codeAnalyzerResult, analysisSchema?.format)
         : undefined;
 
     notifyAgent(
@@ -468,7 +403,7 @@ async function handleGenerate(
     const testAgent = "Test Generator";
     notifyAgent(panel, testAgent, "running");
     const testResult = await runTestGenerator(
-      { assembledContext, codeAnalysis, className, methodName, workspaceRoot: outputRoot },
+      { profile, assembledContext, codeAnalysis, className, methodName, workspaceRoot: outputRoot },
       (prompt) => handler(prompt, panel, subModel ?? undefined)
     );
     saveAgentOutput(outputRoot, "test-generator", testResult);
@@ -487,7 +422,7 @@ async function handleGenerate(
     const testValAgent = "Test Validator";
     notifyAgent(panel, testValAgent, "running");
     const testValResult = await runTestValidator(
-      { testCode: finalTestCode, assembledContext, className, methodName, workspaceRoot: outputRoot },
+      { profile, testCode: finalTestCode, assembledContext, className, methodName, workspaceRoot: outputRoot },
       (prompt) => handler(prompt, panel, subModel ?? undefined)
     );
     saveAgentOutput(outputRoot, "validator-test", testValResult);
@@ -509,6 +444,7 @@ async function handleGenerate(
       assembledContext,
       savedPath,
       spec,
+      profile,
     });
 
     const elapsedMs = Date.now() - generationStart;
@@ -640,6 +576,7 @@ export async function createWebviewPanel(
           notifyAgent(panel, "Chat Fixer", "running");
           const fixResult = await runChatFixer(
             {
+              profile: testCtx.profile,
               testCode: testCtx.testCode,
               assembledContext: testCtx.assembledContext,
               userMessage: text,

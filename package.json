@@ -29,7 +29,8 @@
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:unit": "node -e \"fs.rmSync('out-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node --test \"out-test/test/**/*.test.js\""
+    "test:unit": "node -e \"fs.rmSync('out-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node scripts/copyPromptTemplates.cjs && node --test \"out-test/test/**/*.test.js\"",
+    "snapshot:prompts": "node -e \"process.env.UPDATE_PROMPT_SNAPSHOTS='1'; child_process.execSync('npm run test:unit',{stdio:'inherit'})\""
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

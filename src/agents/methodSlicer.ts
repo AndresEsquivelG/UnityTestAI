@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { buildMethodSlicerPrompt } from "../prompts/promptBuilder";
+import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -22,6 +23,8 @@ export type MethodSlicerOutput = z.infer<typeof methodSlicerOutputSchema>;
 // ── Input ──────────────────────────────────────────────────────────────────────
 
 export interface MethodSlicerInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   code: string;
   className: string;
   methodName: string;
@@ -46,6 +49,7 @@ export async function runMethodSlicer(
   llmHandler: (prompt: string) => Promise<string>
 ): Promise<MethodSlicerOutput> {
   const prompt = buildMethodSlicerPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.code

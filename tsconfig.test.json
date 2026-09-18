@@ -8,6 +8,11 @@
 	 *
 	 * Solo se compila lo que las pruebas ejercitan. El resto de la extensión
 	 * depende del editor y de paquetes que solo webpack resuelve.
+	 *
+	 * `src/prompts` entra porque la foto de los prompts ejercita el constructor
+	 * de verdad, no una copia. Ese módulo busca las plantillas en la carpeta
+	 * hermana de la suya, así que `npm run test:unit` las copia a
+	 * `out-test/prompts` después de compilar.
 	 */
 	"extends": "./tsconfig.json",
 	"compilerOptions": {
@@ -20,6 +25,9 @@
 	"include": [
 		"src/test/**/*.ts",
 		"src/adapters/**/*.ts",
-		"src/core/**/*.ts"
+		"src/core/**/*.ts",
+		"src/prompts/**/*.ts",
+		"src/agents/**/*.ts",
+		"src/utils/**/*.ts"
 	]
 }

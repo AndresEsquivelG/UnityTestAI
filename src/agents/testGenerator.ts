@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { buildTestGeneratorPrompt } from "../prompts/promptBuilder";
+import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -22,6 +23,8 @@ export type TestGeneratorOutput = z.infer<typeof testGeneratorOutputSchema>;
 // ── Input ──────────────────────────────────────────────────────────────────────
 
 export interface TestGeneratorInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   assembledContext: string;
   codeAnalysis?: string;
   className: string;
@@ -53,6 +56,7 @@ export async function runTestGenerator(
   fs.mkdirSync(dumpDir, { recursive: true });
 
   const prompt = buildTestGeneratorPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.assembledContext,

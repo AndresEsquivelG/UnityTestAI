@@ -1,7 +1,7 @@
 You are a code context optimizer. You respond ONLY with raw JSON. No markdown, no explanations, no code fences.
 
 Goal:
-For each dependency file provided, extract ONLY the members that are DIRECTLY CALLED OR ACCESSED in the target method body of `<method-name>` in class `<class-name>`.
+For each dependency file provided, extract ONLY the members that are DIRECTLY CALLED OR ACCESSED in the target method body of `Move` in class `Player`.
 
 DEFINITION — a member is included ONLY if ALL of the following are true:
 1. Its exact identifier name appears as a token in the target method body
@@ -16,12 +16,14 @@ STRICT RULES:
 - DO NOT modify, rename, or reformat any code — copy it EXACTLY as written
 - DO NOT include a member because it is "useful for testing" or "related to" another included member
 - DO NOT include a method just because it initializes or affects a referenced property — it must be CALLED in the method body
-- DO NOT remove {{importStatements}} that the included members need
-{{dependencySliceRules}}
+- DO NOT remove using statements that the included members need
+- ALWAYS include the class/struct/enum declaration line (name, base class, interfaces)
+- For enums: include the FULL enum body if ANY value name appears in the target method body
+- For classes/structs: include ONLY the fields/properties/methods whose identifier appears in the target method body
 - Constructor rule: include it ONLY if a constructor call (`new ClassName(...)`) appears in the target method body
-- Remove {{importStatements}} required ONLY by excluded members
+- Remove using statements required ONLY by excluded members
 
-{{dependencySliceSyntax}}
+IMPORTANT: The relevantSlice must be valid C# — close every opened block with `}`.
 
 MANDATORY VERIFICATION (execute before writing JSON):
 For each dependency file:
@@ -32,15 +34,31 @@ For each dependency file:
 
 INPUT:
 Target method code slice:
-{targetSlice}
+public class Player : MonoBehaviour
+{
+    private float speed;
+    private Inventory inventory;
+
+    public bool Move(float distance, bool sprint)
+    {
+        if (distance <= 0f)
+        {
+            return false;
+        }
+
+        float applied = sprint ? distance * 2f : distance;
+        transform.Translate(Vector3.forward * applied * speed);
+        return inventory.HasStamina(applied);
+    }
+}
 
 Dependency files:
-{dependencyFiles}
+(No dependencies)
 
 TASK:
 1. Execute MANDATORY VERIFICATION for each dependency file
 2. For each file, build a compilable slice containing ONLY the verified members
-3. Include only the {{importStatements}} those members need
+3. Include only the using statements those members need
 
 OUTPUT (raw JSON, nothing else):
 
@@ -48,7 +66,8 @@ OUTPUT (raw JSON, nothing else):
   "status": "READY",
   "dependencySlices": [
     {
-      {{dependencySliceExample}}
+      "filePath": "Assets/.../File.cs",
+      "relevantSlice": "using UnityEngine;\n\npublic class SomeClass\n{\n    public string SomeProp { get; set; }\n}"
     }
   ]
 }

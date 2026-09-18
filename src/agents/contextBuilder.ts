@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { buildContextBuilderPrompt } from "../prompts/promptBuilder";
+import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -29,6 +30,8 @@ export type ContextBuilderOutput = z.infer<typeof contextBuilderOutputSchema>;
 // ── Input ──────────────────────────────────────────────────────────────────────
 
 export interface ContextBuilderInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   codeSlice: string;
   dependencyFiles: string[];
   /**
@@ -102,6 +105,7 @@ export async function runContextBuilder(
   }
 
   const prompt = buildContextBuilderPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.codeSlice,

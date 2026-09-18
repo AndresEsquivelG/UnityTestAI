@@ -58,6 +58,7 @@ export type {
   AnalysisSchemaExtension,
   PromptExtensionPoint,
   PromptProfile,
+  PromptVocabulary,
 } from "./generation";
 
 export type {

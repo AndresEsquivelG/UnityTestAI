@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import type { PromptProfile } from '../core/contracts';
+import { composeTemplate } from '../core/prompts';
 
 const PROMPTS_DIR = path.join(__dirname, "..", "prompts");
 
@@ -9,6 +11,18 @@ function loadTemplate(fileName: string): string {
     throw new Error(`Prompt template not found: ${filePath}`);
   }
   return fs.readFileSync(filePath, "utf8");
+}
+
+/**
+ * Las ocho plantillas son neutras: exponen los puntos de extensión `{{...}}` que
+ * rellena el perfil del adaptador (OP-08), y ninguna nombra una tecnología.
+ *
+ * El perfil se compone ANTES de sustituir los valores de la corrida. El orden
+ * importa: al revés, un `{{algo}}` que viniera dentro del código de la persona
+ * usuaria se interpretaría como un punto de extensión.
+ */
+function compose(fileName: string, profile: PromptProfile): string {
+  return composeTemplate(loadTemplate(fileName), profile);
 }
 
 function escapeRegex(str: string): string {
@@ -31,11 +45,12 @@ function replacePlaceholders(
  * Agent 0: extracts a minimal code slice from the full source file.
  */
 export function buildMethodSlicerPrompt(
+  profile: PromptProfile,
   methodName: string,
   className: string,
   code: string
 ): string {
-  return replacePlaceholders(loadTemplate("methodSlicerPrompt.txt"), {
+  return replacePlaceholders(compose("methodSlicerPrompt.txt", profile), {
     "<method-name>": methodName,
     "<class-name>":  className,
     "{code}":        code,
@@ -47,12 +62,13 @@ export function buildMethodSlicerPrompt(
  * Agent 1: receives the code slice and identifies missing external files.
  */
 export function buildDependencyResolverPrompt(
+  profile: PromptProfile,
   methodName: string,
   className: string,
   codeSlice: string,
   projectTree: string
 ): string {
-  return replacePlaceholders(loadTemplate("dependencyResolverPrompt.txt"), {
+  return replacePlaceholders(compose("dependencyResolverPrompt.txt", profile), {
     "<method-name>": methodName,
     "<class-name>":  className,
     "{code}":        codeSlice,
@@ -65,12 +81,13 @@ export function buildDependencyResolverPrompt(
  * Agent 2: slices each dependency down to only the members the target method uses.
  */
 export function buildContextBuilderPrompt(
+  profile: PromptProfile,
   methodName: string,
   className: string,
   targetSlice: string,
   dependencyFiles: string
 ): string {
-  return replacePlaceholders(loadTemplate("contextBuilderPrompt.txt"), {
+  return replacePlaceholders(compose("contextBuilderPrompt.txt", profile), {
     "<method-name>":    methodName,
     "<class-name>":     className,
     "{targetSlice}":    targetSlice,
@@ -83,11 +100,12 @@ export function buildContextBuilderPrompt(
  * Agent 2.7: produces a decision table and branch analysis from the assembled context.
  */
 export function buildCodeAnalyzerPrompt(
+  profile: PromptProfile,
   methodName: string,
   className: string,
   assembledContext: string
 ): string {
-  return replacePlaceholders(loadTemplate("codeAnalyzerPrompt.txt"), {
+  return replacePlaceholders(compose("codeAnalyzerPrompt.txt", profile), {
     "<method-name>":      methodName,
     "<class-name>":       className,
     "{assembledContext}": assembledContext,
@@ -99,6 +117,7 @@ export function buildCodeAnalyzerPrompt(
  * Agent 2.5: verifies the assembled context has everything needed for test generation.
  */
 export function buildContextValidatorPrompt(
+  profile: PromptProfile,
   methodName: string,
   className: string,
   assembledContext: string,
@@ -112,7 +131,7 @@ The context is organized into sections with \`// ── TARGET: ... ──\` and
 Both forms are VALID. When a section contains a full file, treat the extra members as normal — this is NOT a problem and you must NOT trim, shorten, or "optimize" it. Your job is only to confirm completeness, never to reduce.\n`
     : "";
 
-  return replacePlaceholders(loadTemplate("contextValidatorPrompt.txt"), {
+  return replacePlaceholders(compose("contextValidatorPrompt.txt", profile), {
     "<method-name>":      methodName,
     "<class-name>":       className,
     "{assembledContext}": assembledContext,
@@ -122,10 +141,11 @@ Both forms are VALID. When a section contains a full file, treat the extra membe
 
 /**
  * Builds the test-generator prompt (testGeneratorPrompt.txt).
- * Agent 3: generates PlayMode NUnit tests from the assembled context.
+ * Agent 3: generates the tests from the assembled context.
  * Optionally injects a pre-computed code analysis block.
  */
 export function buildTestGeneratorPrompt(
+  profile: PromptProfile,
   methodName: string,
   className: string,
   assembledContext: string,
@@ -135,7 +155,7 @@ export function buildTestGeneratorPrompt(
     ? `━━ PRE-COMPUTED CODE ANALYSIS (Agent 2.7) ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\nVerify this analysis against the context. If correct, use it directly for STEP 0 and STEP 1.\n\n${codeAnalysis}\n\n`
     : "";
 
-  return replacePlaceholders(loadTemplate("testGeneratorPrompt.txt"), {
+  return replacePlaceholders(compose("testGeneratorPrompt.txt", profile), {
     "<method-name>":      methodName,
     "<class-name>":       className,
     "{assembledContext}": assembledContext,
@@ -145,15 +165,16 @@ export function buildTestGeneratorPrompt(
 
 /**
  * Builds the test-validator prompt (testValidatorPrompt.txt).
- * Agent 3.5: verifies the generated C# NUnit test class for structure and coverage.
+ * Agent 3.5: verifies the generated test unit for structure and coverage.
  */
 export function buildTestValidatorPrompt(
+  profile: PromptProfile,
   methodName: string,
   className: string,
   assembledContext: string,
   testCode: string
 ): string {
-  return replacePlaceholders(loadTemplate("testValidatorPrompt.txt"), {
+  return replacePlaceholders(compose("testValidatorPrompt.txt", profile), {
     "<method-name>":      methodName,
     "<class-name>":       className,
     "{assembledContext}": assembledContext,
@@ -166,13 +187,14 @@ export function buildTestValidatorPrompt(
  * Chat Fixer: fixes errors in generated tests or answers questions, given full test + context.
  */
 export function buildChatFixerPrompt(
+  profile: PromptProfile,
   methodName: string,
   className: string,
   assembledContext: string,
   testCode: string,
   userMessage: string
 ): string {
-  return replacePlaceholders(loadTemplate("chatFixerPrompt.txt"), {
+  return replacePlaceholders(compose("chatFixerPrompt.txt", profile), {
     "<method-name>":      methodName,
     "<class-name>":       className,
     "{assembledContext}": assembledContext,

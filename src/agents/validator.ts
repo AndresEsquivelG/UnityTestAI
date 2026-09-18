@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { buildContextValidatorPrompt, buildTestValidatorPrompt } from "../prompts/promptBuilder";
+import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -64,6 +65,8 @@ function parseValidatorResponse(
 // ── Context Validator ──────────────────────────────────────────────────────────
 
 export interface ContextValidatorInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   assembledContext: string;
   className: string;
   methodName: string;
@@ -75,7 +78,7 @@ export interface ContextValidatorInput {
  * Agent 2.5 — Context Validator
  *
  * Verifies that the assembled context produced by the Context Builder contains
- * everything needed to generate NUnit tests. If the LLM finds structural gaps
+ * everything needed to generate the tests. If the LLM finds structural gaps
  * it returns a corrected context in the same call (one implicit retry).
  *
  * Saves:
@@ -91,6 +94,7 @@ export async function runContextValidator(
   fs.mkdirSync(dumpDir, { recursive: true });
 
   const prompt = buildContextValidatorPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.assembledContext,
@@ -115,6 +119,8 @@ export async function runContextValidator(
 // ── Test Validator ─────────────────────────────────────────────────────────────
 
 export interface TestValidatorInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   testCode: string;
   assembledContext: string;
   className: string;
@@ -125,7 +131,7 @@ export interface TestValidatorInput {
 /**
  * Agent 3.5 — Test Validator
  *
- * Verifies the generated C# NUnit test class for structural correctness and
+ * Verifies the generated test unit for structural correctness and
  * branch coverage. If the LLM finds issues it returns corrected code in the
  * same call (one implicit retry).
  *
@@ -142,6 +148,7 @@ export async function runTestValidator(
   fs.mkdirSync(dumpDir, { recursive: true });
 
   const prompt = buildTestValidatorPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.assembledContext,

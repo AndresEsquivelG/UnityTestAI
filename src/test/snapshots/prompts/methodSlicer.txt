@@ -1,7 +1,7 @@
 You are a code extraction engine. You respond ONLY with raw JSON. No markdown, no explanations, no code fences.
 
 Goal:
-Extract a minimal, compilable code slice for the target method `<method-name>` in class `<class-name>`.
+Extract a minimal, compilable code slice for the target method `Move` in class `Player`.
 
 STRICT RULES:
 - DO NOT generate tests
@@ -11,30 +11,69 @@ STRICT RULES:
 - DO NOT include methods other than the target method (except the constructor, see below)
 - DO NOT include fields, properties, or constants that the target method does NOT reference by name in its body
 - DO NOT modify, rename, or reformat any code — copy it EXACTLY as written
-- DO NOT add or remove {{importStatements}} — include ONLY the ones the target method actually needs
+- DO NOT add or remove using statements — include ONLY the ones the target method actually needs
 
 TASK:
 
 Scan the target method body and build a code slice containing ONLY:
 
-1. {{sliceImportRule}}
+1. Using statements: only those required by types used inside the target method body or signature
 2. Class signature: the class declaration line (name, base class, interfaces) — nothing else
 3. Fields/properties/constants: ONLY those whose names appear literally inside the target method body. Scan the method body for field references — if a name matches a class member, include it. Include ALL matches, not just some.
 4. Constructor: include the constructor ONLY if it initializes any of the fields included in step 3. If the class has no constructor or the constructor does not touch the included fields, skip it.
 5. Target method: the COMPLETE method (signature + full body), copied exactly as written
 
 INPUT:
-- Target method: `<method-name>`
-- Target class: `<class-name>`
+- Target method: `Move`
+- Target class: `Player`
 
 Source code:
-{code}
+using UnityEngine;
+
+namespace Game.Actors
+{
+    public class Player : MonoBehaviour
+    {
+        private float speed;
+        private Inventory inventory;
+
+        void Awake()
+        {
+            speed = 5f;
+        }
+
+        public bool Move(float distance, bool sprint)
+        {
+            if (distance <= 0f)
+            {
+                return false;
+            }
+
+            float applied = sprint ? distance * 2f : distance;
+            transform.Translate(Vector3.forward * applied * speed);
+            return inventory.HasStamina(applied);
+        }
+    }
+}
 
 OUTPUT (raw JSON, nothing else):
 
 {
   "status": "READY",
   "codeSlice": [
-    {{sliceExample}}
+    "using UnityEngine;",
+    "using System.Linq;",
+    "",
+    "public class ClassName : MonoBehaviour",
+    "{",
+    "    public GameObject[] SomeField;",
+    "",
+    "    public ClassName() { ... }",
+    "",
+    "    private void TargetMethod()",
+    "    {",
+    "        // exact method body",
+    "    }",
+    "}"
   ]
 }

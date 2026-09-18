@@ -1,5 +1,6 @@
 import type {
   AdapterDescriptor,
+  AnalysisSchemaExtension,
   ApplicabilityResult,
   ArtifactRequest,
   ArtifactSpec,
@@ -19,19 +20,19 @@ import { detectUnityProject } from "./detection";
 import { buildUnityProjectModel } from "./projectModel";
 import { locateUnitSymbol, readUnitSource, resolveUnityDependency } from "./symbols";
 import { unityPromptProfile } from "./promptProfile";
+import { unityAnalysisSchema } from "./analysisSchema";
 import { checkUnityPreconditions, normalizeUnityCode, specifyUnityArtifact } from "./artifact";
 
 /**
  * Adaptador del ecosistema Unity / C#.
  *
  * Primera implementación de la interfaz de adaptación. Cubre las once
- * operaciones obligatorias trasladando el comportamiento que ya existía
- * repartido por el núcleo, y no declara ninguna capacidad opcional.
+ * operaciones obligatorias y una de las cinco opcionales, OP-09.
  *
- * Las declara todas en falso porque hoy es cierto: en el proyecto no hay una
- * sola invocación de compilación, de ejecución de pruebas ni de recolección de
- * cobertura. Cuando se implementen, esta declaración cambia aquí y el núcleo no
- * se entera.
+ * Las otras cuatro se declaran en falso porque hoy es cierto: en el proyecto no
+ * hay una sola invocación de compilación, de ejecución de pruebas ni de
+ * recolección de cobertura. Cuando se implementen, esta declaración cambia aquí
+ * y el núcleo no se entera.
  *
  * Nada de este archivo depende del editor: el adaptador recibe rutas y devuelve
  * datos, de modo que se puede ejercitar sin abrir el entorno.
@@ -48,7 +49,7 @@ export class UnityAdapter implements EcosystemAdapter {
     verification: "none",
     runTests: false,
     coverage: false,
-    analysisSchemaExtension: false,
+    analysisSchemaExtension: true,
     lifecycle: false,
   };
 
@@ -74,6 +75,10 @@ export class UnityAdapter implements EcosystemAdapter {
 
   getPromptProfile(project: ProjectModel): PromptProfile {
     return unityPromptProfile(project);
+  }
+
+  extendAnalysisSchema(): AnalysisSchemaExtension {
+    return unityAnalysisSchema();
   }
 
   specifyArtifact(request: ArtifactRequest): ArtifactSpec {

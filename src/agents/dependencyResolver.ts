@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { buildDependencyResolverPrompt } from "../prompts/promptBuilder";
+import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -27,6 +28,8 @@ export type DependencyResolverOutput = z.infer<typeof dependencyOutputSchema>;
 // ── Input ──────────────────────────────────────────────────────────────────────
 
 export interface DependencyResolverInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   codeSlice: string;
   projectTree: string;
   className: string;
@@ -48,6 +51,7 @@ export async function runDependencyResolver(
   llmHandler: (prompt: string) => Promise<string>
 ): Promise<DependencyResolverOutput> {
   const prompt = buildDependencyResolverPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.codeSlice,
