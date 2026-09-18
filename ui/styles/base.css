@@ -16,6 +16,12 @@ body {
 }
 
 /* ========================== Logo ========================== */
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 header .logo {
   height: 40px;
   margin: 10px;

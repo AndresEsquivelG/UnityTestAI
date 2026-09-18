@@ -102,57 +102,6 @@ export interface CodeAnalyzerInput {
   workspaceRoot: string;
 }
 
-// ── Dependency file reader ─────────────────────────────────────────────────────
-
-export interface DependencyFileResult {
-  path: string;
-  found: boolean;
-  content?: string;
-}
-
-export interface ReadDependencyResult {
-  code: string;
-  files: DependencyFileResult[];
-}
-
-/**
- * Reads dependency files resolved by Agent 1 and concatenates their contents.
- * Returns both the combined code and the resolution status of each file.
- * Handles both cases: workspaceRoot pointing to the project root (with Assets/
- * as subfolder) or directly to the Assets folder.
- */
-export function readDependencyFiles(
-  filePaths: string[],
-  workspaceRoot: string
-): ReadDependencyResult {
-  let combined = "";
-  const files: DependencyFileResult[] = [];
-
-  for (const file of filePaths) {
-    const directPath = path.join(workspaceRoot, file);
-    const withoutAssets = file.replace(/^Assets\//, "");
-    const strippedPath = path.join(workspaceRoot, withoutAssets);
-
-    let resolvedPath: string | null = null;
-    if (fs.existsSync(directPath)) {
-      resolvedPath = directPath;
-    } else if (fs.existsSync(strippedPath)) {
-      resolvedPath = strippedPath;
-    }
-
-    if (resolvedPath) {
-      const content = fs.readFileSync(resolvedPath, "utf8");
-      combined += `\n\n// File: ${file}\n${content}`;
-      files.push({ path: file, found: true, content });
-    } else {
-      console.warn(`Dependency file not found: ${file} (tried ${directPath} and ${strippedPath})`);
-      files.push({ path: file, found: false });
-    }
-  }
-
-  return { code: combined, files };
-}
-
 // ── Main function ──────────────────────────────────────────────────────────────
 
 /**

@@ -48,6 +48,7 @@ const chatSendBtn = document.getElementById("chatSendBtn"); // Botón para envia
 const reduceContextToggle = document.getElementById("reduceContextToggle"); // Toggle de contexto reducido
 const reduceContextCaption = document.getElementById("reduceContextCaption"); // Etiqueta del toggle
 const contextToggleBar = document.getElementById("contextToggleBar"); // Barra del toggle de contexto
+const ecosystemBadge = document.getElementById("ecosystemBadge"); // Ecosistema detectado
 
 function getReduceContext() {
   return reduceContextToggle ? reduceContextToggle.checked : true;
@@ -200,6 +201,31 @@ function showGenTokens(total) {
 }
 
 /* ============================
+   Ecosistema detectado
+============================ */
+
+/**
+ * Muestra contra qué ecosistema se va a generar. El texto lo compone el
+ * adaptador; aquí solo se presenta, junto con los marcadores que lo
+ * sustentan, para que una detección equivocada se pueda diagnosticar.
+ */
+function showEcosystem(ecosystem) {
+  if (!ecosystemBadge || !ecosystem) return;
+
+  ecosystemBadge.textContent = ecosystem.displayName;
+
+  const confidence = Math.round((ecosystem.confidence ?? 0) * 100);
+  const evidence = (ecosystem.evidence ?? []).join(", ");
+
+  const tooltip = [`Ecosistema detectado con ${confidence}% de confianza`];
+  if (evidence) tooltip.push(`Marcadores: ${evidence}`);
+  tooltip.push(`Adaptador ${ecosystem.version}`);
+  ecosystemBadge.title = tooltip.join("\n");
+
+  ecosystemBadge.style.display = "inline-flex";
+}
+
+/* ============================
    Comunicación con el backend
 ============================ */
 
@@ -278,6 +304,10 @@ window.addEventListener("message", (event) => {
     /* ----------------------------------------
       Poblar el menú de modelos LLM disponibles
     ---------------------------------------- */
+    case "setEcosystem":
+      showEcosystem(message.ecosystem);
+      break;
+
     case "setModels":
       setModels(
         message.models,

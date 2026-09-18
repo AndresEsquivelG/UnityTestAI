@@ -10,7 +10,6 @@ export const testGeneratorOutputSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("SUCCESS"),
     testCode: z.string(),
-    savedPath: z.string(),
   }),
   z.object({
     status: z.literal("ERROR"),
@@ -28,7 +27,6 @@ export interface TestGeneratorInput {
   className: string;
   methodName: string;
   workspaceRoot: string;
-  model: string;
 }
 
 // ── Main function ──────────────────────────────────────────────────────────────
@@ -37,14 +35,15 @@ export interface TestGeneratorInput {
  * Agent 3 — Test Generator
  *
  * Receives the fully assembled context from the Context Builder and generates
- * a complete PlayMode NUnit test class with the minimum tests needed for
- * 100% decision coverage.
+ * the test code with the minimum tests needed for 100% decision coverage.
+ *
+ * Returns the model's answer as it came. Where the file goes, how it is named
+ * and how the code is adjusted to the naming convention are decisions of the
+ * ecosystem adapter (OP-10 and OP-11), so they no longer live here.
  *
  * Saves:
  *  - test-generator-prompt.txt    → prompt sent to LLM
  *  - test-generator-output.txt    → raw LLM response
- *  - test-generator-output.cs     → cleaned C# test code
- *  - <workspaceRoot>/Tests/       → final test file saved to Unity project
  */
 export async function runTestGenerator(
   input: TestGeneratorInput,
@@ -66,45 +65,39 @@ export async function runTestGenerator(
 
   fs.writeFileSync(path.join(dumpDir, "test-generator-output.txt"), raw, "utf8");
 
-  let cleanCode = raw.trim().replace(/^```(csharp|cs)?\s*/i, "").replace(/```$/, "").trim();
+  const failure = readFailureEnvelope(raw);
+  if (failure) {
+    return { status: "ERROR", message: failure };
+  }
 
-  // LLM returned an error JSON instead of code
-  if (cleanCode.startsWith("{")) {
-    try {
-      const json = JSON.parse(JsonSanitizer.sanitize(cleanCode));
-      if (json.status === "GENERATION_FAILED" || json.status === "INVALID_INPUT") {
-        return {
-          status: "ERROR",
-          message: json.issues?.join("; ") || "Test generation failed",
-        };
-      }
-    } catch {
-      // Not JSON — treat as code
+  return { status: "SUCCESS", testCode: raw };
+}
+
+/**
+ * The model sometimes answers with an error envelope instead of code. Detecting
+ * that is this agent's job and does not depend on the ecosystem; the fences are
+ * stripped only to look inside, not to clean up the answer, which is what OP-11
+ * does with the adapter's own conventions.
+ */
+function readFailureEnvelope(raw: string): string | null {
+  const unfenced = raw
+    .trim()
+    .replace(/^```[a-z#+]*\s*/i, "")
+    .replace(/```$/, "")
+    .trim();
+
+  if (!unfenced.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    const json = JSON.parse(JsonSanitizer.sanitize(unfenced));
+    if (json.status === "GENERATION_FAILED" || json.status === "INVALID_INPUT") {
+      return json.issues?.join("; ") || "Test generation failed";
     }
+  } catch {
+    // Not JSON — treat as code
   }
 
-  // ── Save to Tests/ folder ────────────────────────────────────────────────
-  const testsDir = path.join(input.workspaceRoot, "Tests");
-  if (!fs.existsSync(testsDir)) {
-    return {
-      status: "ERROR",
-      message: "Tests/ folder does not exist in the workspace. Create it with a .asmdef first.",
-    };
-  }
-
-  const testFileName = `UTIA_${input.model}_${input.className}_${input.methodName}`;
-
-  cleanCode = cleanCode.replace(
-    /public\s+class\s+\w+/,
-    `public class ${testFileName}`
-  );
-
-  const testFilePath = path.join(testsDir, `${testFileName}.cs`);
-  fs.writeFileSync(testFilePath, cleanCode, "utf8");
-
-  return {
-    status: "SUCCESS",
-    testCode: cleanCode,
-    savedPath: testFilePath,
-  };
+  return null;
 }

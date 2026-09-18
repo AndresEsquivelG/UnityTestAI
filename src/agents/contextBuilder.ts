@@ -3,7 +3,6 @@ import * as path from "path";
 import { z } from "zod";
 import { buildContextBuilderPrompt } from "../prompts/promptBuilder";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
-import { readDependencyFiles } from "./codeAnalyzer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
 
@@ -32,7 +31,12 @@ export type ContextBuilderOutput = z.infer<typeof contextBuilderOutputSchema>;
 export interface ContextBuilderInput {
   codeSlice: string;
   dependencyFiles: string[];
-  resolvedDependencyCode?: string;
+  /**
+   * Contenido de las dependencias, ya resuelto por el adaptador (OP-07). Es
+   * obligatorio: resolverlo aquí obligaría a este agente a saber cómo se
+   * traduce una referencia a una ruta, que es conocimiento del ecosistema.
+   */
+  resolvedDependencyCode: string;
   className: string;
   methodName: string;
   workspaceRoot: string;
@@ -97,15 +101,11 @@ export async function runContextBuilder(
     return result;
   }
 
-  const rawDependencyCode =
-    input.resolvedDependencyCode ??
-    readDependencyFiles(input.dependencyFiles, input.workspaceRoot).code;
-
   const prompt = buildContextBuilderPrompt(
     input.methodName,
     input.className,
     input.codeSlice,
-    rawDependencyCode
+    input.resolvedDependencyCode
   );
 
   fs.writeFileSync(path.join(dumpDir, "context-builder-prompt.txt"), prompt, "utf8");

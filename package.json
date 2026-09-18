@@ -29,7 +29,7 @@
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "test:unit": "tsc -p tsconfig.test.json && node --test \"out-test/test/**/*.test.js\""
+    "test:unit": "node -e \"fs.rmSync('out-test',{recursive:true,force:true})\" && tsc -p tsconfig.test.json && node --test \"out-test/test/**/*.test.js\""
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
