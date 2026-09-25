@@ -2,8 +2,8 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { collectClassAndMethod } from "../collectInputs";
-import { ChatSession } from "../llm/sessionManager";
-import { generateWithChatGPT, generateWithOllama, generateWithClaude } from "../llm";
+import { ChatSession, type ChatMessage } from "../llm/sessionManager";
+import { generateWithChatGPT, generateWithOllama, generateWithClaude, type LLMResult } from "../llm";
 import type { ActiveEcosystem } from "../core/adapters";
 import { supportsSchemaExtension } from "../core/contracts";
 import type {
@@ -78,38 +78,48 @@ function addTokenUsage(
 
 // ── Model handlers ─────────────────────────────────────────────────────────────
 
-const modelHandlers: Record<
-  string,
-  (prompt: string, panel: vscode.WebviewPanel, subModel?: string) => Promise<string>
-> = {
-  chatgpt: async (prompt, panel, subModel) => {
-    let session = sessionsByPanel.get(panel);
-    if (!session) { session = new ChatSession(); sessionsByPanel.set(panel, session); }
-    session.addUserMessage(prompt);
-    const { text, usage } = await generateWithChatGPT(session.getMessages(), subModel || "gpt-4o-mini");
-    session.addAssistantMessage(text);
-    addTokenUsage(panel, usage);
-    return text;
-  },
-  llamaLocal: async (prompt, panel) => {
-    let session = sessionsByPanel.get(panel);
-    if (!session) { session = new ChatSession(); sessionsByPanel.set(panel, session); }
-    session.addUserMessage(prompt);
-    const { text, usage } = await generateWithOllama(session.getMessages());
-    session.addAssistantMessage(text);
-    addTokenUsage(panel, usage);
-    return text;
-  },
-  claude: async (prompt, panel, subModel) => {
-    let session = sessionsByPanel.get(panel);
-    if (!session) { session = new ChatSession(); sessionsByPanel.set(panel, session); }
-    session.addUserMessage(prompt);
-    const { text, usage } = await generateWithClaude(session.getMessages(), subModel || "claude-opus-4-8");
-    session.addAssistantMessage(text);
-    addTokenUsage(panel, usage);
-    return text;
-  },
+type ModelProvider = (messages: ChatMessage[], subModel?: string) => Promise<LLMResult>;
+
+const modelProviders: Record<string, ModelProvider> = {
+  chatgpt: (messages, subModel) => generateWithChatGPT(messages, subModel || "gpt-4o-mini"),
+  llamaLocal: (messages) => generateWithOllama(messages),
+  claude: (messages, subModel) => generateWithClaude(messages, subModel || "claude-opus-4-8"),
 };
+
+/**
+ * Llamada sin historial. Los prompts de los agentes son autocontenidos: el
+ * historial solo multiplicaba los tokens de entrada y, con ventanas chicas,
+ * hacía que el servidor recortara el prompt del agente actual.
+ */
+async function askOnce(
+  provider: ModelProvider,
+  prompt: string,
+  panel: vscode.WebviewPanel,
+  subModel?: string
+): Promise<string> {
+  const { text, usage } = await provider([{ role: "user", content: prompt }], subModel);
+  addTokenUsage(panel, usage);
+  return text;
+}
+
+/** Llamada dentro de la conversación del panel, que sí necesita historial. */
+async function askInChat(
+  provider: ModelProvider,
+  message: string,
+  panel: vscode.WebviewPanel,
+  subModel?: string
+): Promise<string> {
+  let session = sessionsByPanel.get(panel);
+  if (!session) {
+    session = new ChatSession();
+    sessionsByPanel.set(panel, session);
+  }
+  session.addUserMessage(message);
+  const { text, usage } = await provider(session.getMessages(), subModel);
+  session.addAssistantMessage(text);
+  addTokenUsage(panel, usage);
+  return text;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -215,8 +225,9 @@ async function handleGenerate(
 
     panel.webview.postMessage({ command: "clearPipeline" });
 
-    const handler = modelHandlers[model];
-    if (!handler) throw new Error(`Modelo no válido: ${model}`);
+    const provider = modelProviders[model];
+    if (!provider) throw new Error(`Modelo no válido: ${model}`);
+    const ask = (prompt: string) => askOnce(provider, prompt, panel, subModel ?? undefined);
 
     // ── OP-05: localización de la unidad bajo prueba ─────────────────────────
     const target: UnitTarget = { className, methodName };
@@ -266,7 +277,7 @@ async function handleGenerate(
       notifyAgent(panel, slicerAgent, "running");
       const slicerResult = await runMethodSlicer(
         { profile, code: targetCode, className, methodName, workspaceRoot: outputRoot },
-        (prompt) => handler(prompt, panel, subModel ?? undefined)
+        ask
       );
       saveAgentOutput(outputRoot, "method-slicer", slicerResult);
 
@@ -286,7 +297,7 @@ async function handleGenerate(
     notifyAgent(panel, depAgent, "running");
     const depResult = await runDependencyResolver(
       { profile, codeSlice, projectTree, className, methodName, workspaceRoot: outputRoot },
-      (prompt) => handler(prompt, panel, subModel ?? undefined)
+      ask
     );
     saveAgentOutput(outputRoot, "dependency-resolver", depResult);
 
@@ -324,7 +335,7 @@ async function handleGenerate(
           methodName,
           workspaceRoot: outputRoot,
         },
-        (prompt) => handler(prompt, panel, subModel ?? undefined)
+        ask
       );
       saveAgentOutput(outputRoot, "context-builder", ctxResult);
 
@@ -356,7 +367,7 @@ async function handleGenerate(
     notifyAgent(panel, ctxValAgent, "running");
     const ctxValResult = await runContextValidator(
       { profile, assembledContext: preValidationContext, className, methodName, workspaceRoot: outputRoot, fullContext: !reduceContext },
-      (prompt) => handler(prompt, panel, subModel ?? undefined)
+      ask
     );
     saveAgentOutput(outputRoot, "validator-context", ctxValResult);
 
@@ -383,7 +394,7 @@ async function handleGenerate(
         methodName,
         workspaceRoot: outputRoot,
       },
-      (prompt) => handler(prompt, panel, subModel ?? undefined)
+      ask
     );
     saveAgentOutput(outputRoot, "code-analyzer", codeAnalyzerResult);
 
@@ -404,7 +415,7 @@ async function handleGenerate(
     notifyAgent(panel, testAgent, "running");
     const testResult = await runTestGenerator(
       { profile, assembledContext, codeAnalysis, className, methodName, workspaceRoot: outputRoot },
-      (prompt) => handler(prompt, panel, subModel ?? undefined)
+      ask
     );
     saveAgentOutput(outputRoot, "test-generator", testResult);
 
@@ -423,7 +434,7 @@ async function handleGenerate(
     notifyAgent(panel, testValAgent, "running");
     const testValResult = await runTestValidator(
       { profile, testCode: finalTestCode, assembledContext, className, methodName, workspaceRoot: outputRoot },
-      (prompt) => handler(prompt, panel, subModel ?? undefined)
+      ask
     );
     saveAgentOutput(outputRoot, "validator-test", testValResult);
 
@@ -517,7 +528,6 @@ export async function createWebviewPanel(
 
   panel.webview.postMessage({ command: "setModels", models });
   panel.webview.postMessage({ command: "setEcosystem", ecosystem: ecosystemInfo });
-  sessionsByPanel.set(panel, new ChatSession());
 
   panel.webview.onDidReceiveMessage(async (message) => {
     switch (message.command) {
@@ -568,7 +578,8 @@ export async function createWebviewPanel(
         const meta = generationMetaByPanel.get(panel);
         if (!meta) { vscode.window.showErrorMessage("No hay configuración de modelo cargada."); return; }
 
-        const handler = modelHandlers[meta.model];
+        const provider = modelProviders[meta.model];
+        const subModel = meta.subModel ?? undefined;
         const testCtx = testContextByPanel.get(panel);
 
         if (testCtx) {
@@ -584,7 +595,7 @@ export async function createWebviewPanel(
               methodName: meta.methodName,
               workspaceRoot: ecosystem.rootPath,
             },
-            (prompt) => handler(prompt, panel, meta.subModel ?? undefined)
+            (prompt) => askOnce(provider, prompt, panel, subModel)
           );
           saveAgentOutput(ecosystem.rootPath, "chat-fixer", fixResult);
 
@@ -609,22 +620,14 @@ export async function createWebviewPanel(
           } else {
             // ERROR from ChatFixer — fall back to plain chat
             notifyAgent(panel, "Chat Fixer", "error", fixResult.message);
-            const session = sessionsByPanel.get(panel);
-            if (!session) return;
-            session.addUserMessage(text);
-            const reply = await handler(text, panel, meta.subModel ?? undefined);
-            session.addAssistantMessage(reply);
+            const reply = await askInChat(provider, text, panel, subModel);
             panel.webview.postMessage({ command: "chatResponse", text: reply });
           }
           return;
         }
 
         // No generated test yet — plain chat
-        const session = sessionsByPanel.get(panel);
-        if (!session) { vscode.window.showErrorMessage("No hay sesión de chat activa."); return; }
-        session.addUserMessage(text);
-        const reply = await handler(text, panel, meta.subModel ?? undefined);
-        session.addAssistantMessage(reply);
+        const reply = await askInChat(provider, text, panel, subModel);
         panel.webview.postMessage({ command: "chatResponse", text: reply });
         break;
       }

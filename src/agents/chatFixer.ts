@@ -4,6 +4,7 @@ import { z } from "zod";
 import { buildChatFixerPrompt } from "../prompts/promptBuilder";
 import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
+import { readCodeField } from "../utils/codeField";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
 
@@ -76,7 +77,15 @@ export async function runChatFixer(
     if (!jsonMatch) {
       throw new Error("No JSON object found in chat fixer response");
     }
-    result = chatFixerOutputSchema.parse(JSON.parse(JsonSanitizer.sanitize(jsonMatch[0])));
+    const parsed = chatFixerOutputSchema.parse(JSON.parse(JsonSanitizer.sanitize(jsonMatch[0])));
+    if (parsed.status === "FIXED") {
+      const fixed = readCodeField(parsed.correctedCode);
+      result = fixed.ok
+        ? { ...parsed, correctedCode: fixed.code }
+        : { status: "ERROR", message: `Discarded the fixer's correction: ${fixed.reason}` };
+    } else {
+      result = parsed;
+    }
   } catch (err: any) {
     result = { status: "ERROR", message: `Failed to parse fixer response: ${err.message}` };
   }

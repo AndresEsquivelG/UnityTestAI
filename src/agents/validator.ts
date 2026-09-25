@@ -4,6 +4,7 @@ import { z } from "zod";
 import { buildContextValidatorPrompt, buildTestValidatorPrompt } from "../prompts/promptBuilder";
 import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
+import { readCodeField } from "../utils/codeField";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
 
@@ -53,10 +54,18 @@ function parseValidatorResponse(
       return { status: "VALID", output: originalOutput };
     }
 
-    const fixedOutput = stripSpuriousLeadingBrace(
-      (parsed as Record<string, any>)[fixedKey] as string
+    const issues: string[] = (parsed as any).issues;
+    const fixed = readCodeField(
+      stripSpuriousLeadingBrace((parsed as Record<string, any>)[fixedKey] as string)
     );
-    return { status: "FIXED", output: fixedOutput, issues: (parsed as any).issues };
+    if (!fixed.ok) {
+      // Los problemas que encontró siguen valiendo aunque su corrección no sirva.
+      return {
+        status: "ERROR",
+        message: `Discarded the validator's correction: ${fixed.reason}. Reported issues: ${issues.join("; ")}`,
+      };
+    }
+    return { status: "FIXED", output: fixed.code, issues };
   } catch (err: any) {
     return { status: "ERROR", message: `Failed to parse validator response: ${err.message}` };
   }
