@@ -213,6 +213,11 @@ function samePath(a: string, b: string): boolean {
   return left === right;
 }
 
+/** Detalle de un validador que encontró problemas y no trajo corrección. */
+function unfixedIssues(issues: readonly string[]): string {
+  return `${issues.length} problema(s) sin corregir: ${issues.join(" | ")}`;
+}
+
 function buildFullContext(
   className: string,
   methodName: string,
@@ -477,14 +482,21 @@ async function handleGenerate(
       notifyAgent(panel, ctxValAgent, "error", ctxValResult.message);
       throw new Error(`Context Validator failed: ${ctxValResult.message}`);
     }
-    notifyAgent(
-      panel,
-      ctxValAgent,
-      "done",
-      ctxValResult.status === "FIXED"
-        ? `Corregidos ${ctxValResult.issues.length} problema(s)`
-        : undefined,
-    );
+    if (ctxValResult.status === "UNFIXED") {
+      // Falla blanda: se sigue con el contexto tal cual. Cortar aquí tiraría
+      // las llamadas ya pagadas por algo que el validador no puede arreglar,
+      // y los problemas quedan a la vista.
+      notifyAgent(panel, ctxValAgent, "error", unfixedIssues(ctxValResult.issues));
+    } else {
+      notifyAgent(
+        panel,
+        ctxValAgent,
+        "done",
+        ctxValResult.status === "FIXED"
+          ? `Corregidos ${ctxValResult.issues.length} problema(s)`
+          : undefined,
+      );
+    }
 
     const assembledContext = ctxValResult.output;
 
@@ -567,6 +579,8 @@ async function handleGenerate(
     if (testValResult.status === "ERROR") {
       // Soft failure: surface the error but keep the original generated code
       notifyAgent(panel, testValAgent, "error", testValResult.message);
+    } else if (testValResult.status === "UNFIXED") {
+      notifyAgent(panel, testValAgent, "error", unfixedIssues(testValResult.issues));
     } else if (testValResult.status === "FIXED") {
       finalTestCode = adapter.normalizeGeneratedCode(
         testValResult.output,
