@@ -13,6 +13,9 @@
 	 * de verdad, no una copia. Ese módulo busca las plantillas en la carpeta
 	 * hermana de la suya, así que `npm run test:unit` las copia a
 	 * `out-test/prompts` después de compilar.
+	 *
+	 * De `src/llm` entra solo el cliente de Claude, por la elección de la
+	 * configuración de razonamiento según el modelo.
 	 */
 	"extends": "./tsconfig.json",
 	"compilerOptions": {
@@ -28,6 +31,7 @@
 		"src/core/**/*.ts",
 		"src/prompts/**/*.ts",
 		"src/agents/**/*.ts",
-		"src/utils/**/*.ts"
+		"src/utils/**/*.ts",
+		"src/llm/claude.ts"
 	]
 }

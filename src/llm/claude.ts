@@ -11,6 +11,25 @@ function getClient(): Anthropic {
   return client;
 }
 
+const MAX_TOKENS = 32000;
+
+/**
+ * Models that predate adaptive thinking: they reject `{ type: "adaptive" }`
+ * with a 400 and only accept a fixed thinking budget. Every model from the
+ * 4.6 family on uses adaptive thinking, so this list is closed and a newer
+ * model needs no entry here.
+ */
+const FIXED_BUDGET_MODELS = ["claude-haiku-4-5", "claude-sonnet-4-5", "claude-opus-4-5"];
+
+/** Thinking budget for those models. The API requires it to be below `max_tokens`. */
+const THINKING_BUDGET = 16000;
+
+export function thinkingFor(model: string): Anthropic.ThinkingConfigParam {
+  return FIXED_BUDGET_MODELS.some((prefix) => model.startsWith(prefix))
+    ? { type: "enabled", budget_tokens: THINKING_BUDGET }
+    : { type: "adaptive" };
+}
+
 /**
  * Generates a completion with Claude using the official Anthropic SDK.
  *
@@ -22,8 +41,9 @@ function getClient(): Anthropic {
  *    any `system` role messages are collapsed into the top-level `system` field.
  *  - Streaming is used because generated tests / JSON can be large and would
  *    otherwise risk SDK HTTP timeouts at high max_tokens.
- *  - Adaptive thinking is enabled; thinking blocks are ignored and only text
- *    blocks are returned (the agents downstream parse JSON/code from the text).
+ *  - Thinking is enabled (adaptive, or a fixed budget where the model predates
+ *    it); thinking blocks are ignored and only text blocks are returned (the
+ *    agents downstream parse JSON/code from the text).
  */
 export async function generateWithClaude(
   messages: ChatMessage[],
@@ -43,8 +63,8 @@ export async function generateWithClaude(
 
   const stream = getClient().messages.stream({
     model,
-    max_tokens: 32000,
-    thinking: { type: "adaptive" },
+    max_tokens: MAX_TOKENS,
+    thinking: thinkingFor(model),
     ...(systemPrompt ? { system: systemPrompt } : {}),
     messages: conversation,
   });
