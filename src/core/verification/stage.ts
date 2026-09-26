@@ -69,6 +69,22 @@ export interface VerificationPresentation {
    * proyecto.
    */
   readonly inProgress?: boolean;
+  /**
+   * En falso cuando reintentar esta etapa sola no cambiaría nada, como la
+   * ejecución de una prueba que no pasó la verificación.
+   */
+  readonly retryable?: boolean;
+  /** Solo en la ejecución: cada prueba con su resultado. */
+  readonly cases?: readonly PresentedTestCase[];
+}
+
+/** Una prueba de la ejecución, lista para mostrar. */
+export interface PresentedTestCase {
+  readonly outcome: "passed" | "failed" | "skipped";
+  /** Nombre de la prueba sin la clase, que es la misma en todas. */
+  readonly name: string;
+  /** Por qué falló o se omitió, en una línea. */
+  readonly detail?: string;
 }
 
 /**

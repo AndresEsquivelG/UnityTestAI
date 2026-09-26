@@ -1,7 +1,8 @@
 /**
- * Etapa de verificación del núcleo: invoca OP-13 si el adaptador la ofrece,
- * realimenta sus errores al agente de corrección y prepara el resultado para
- * mostrarlo. No nombra ninguna tecnología.
+ * Etapas de verificación y de ejecución del núcleo: invocan OP-13 y OP-14 si
+ * el adaptador las ofrece, realimentan los errores de la verificación al
+ * agente de corrección y preparan los resultados para mostrarlos. No nombran
+ * ninguna tecnología.
  */
 
 export {
@@ -12,9 +13,18 @@ export {
 
 export type {
   PresentedDiagnostic,
+  PresentedTestCase,
   VerificationOutcome,
   VerificationPresentation,
 } from "./stage";
+
+export {
+  TEST_RUN_STAGE_NAME,
+  presentTestRun,
+  runTestStage,
+} from "./execution";
+
+export type { TestRunOutcome } from "./execution";
 
 export {
   MAX_REPAIR_CYCLES,

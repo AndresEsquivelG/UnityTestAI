@@ -248,6 +248,7 @@ window.addEventListener("message", (event) => {
     case "clearPipeline":
       clearAgentPipeline();
       hideVerification();
+      hideVerification("testRunPanel");
       if (genTimeBadge) genTimeBadge.style.display = "none";
       if (genTokenBadge) genTokenBadge.style.display = "none";
       break;
@@ -302,6 +303,21 @@ window.addEventListener("message", (event) => {
 
     case "verificationRunning":
       showVerificationRunning(message.stageName);
+      // Lo que se va a verificar es otra versión: la ejecución anterior ya no
+      // habla de ella.
+      hideVerification("testRunPanel");
+      break;
+
+    case "testRunRunning":
+      showVerificationRunning(message.stageName, "testRunPanel");
+      break;
+
+    case "showTestRun":
+      showVerification(
+        message.testRun,
+        () => vscode.postMessage({ command: "runTestsAgain" }),
+        "testRunPanel"
+      );
       break;
 
     case "showVerification":

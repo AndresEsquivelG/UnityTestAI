@@ -405,12 +405,12 @@ public static class Utilities
   });
 
   describe("OP-03 · capacidades declaradas", () => {
-    it("declara la extensión del esquema, la compilación y la detección de dependencias, y ninguna otra", () => {
-      // Las tres en falso son ciertas hoy: el pipeline no ejecuta pruebas, no
-      // mide cobertura y no tiene artefactos temporales que preparar ni limpiar.
+    it("declara la extensión del esquema, la compilación, la ejecución y la detección de dependencias, y ninguna otra", () => {
+      // Las dos en falso son ciertas hoy: el pipeline no mide cobertura y no
+      // tiene artefactos temporales que preparar ni limpiar.
       assert.deepEqual(adapter.capabilities, {
         verification: "compile",
-        runTests: false,
+        runTests: true,
         coverage: false,
         analysisSchemaExtension: true,
         lifecycle: false,
@@ -418,11 +418,12 @@ public static class Utilities
       });
     });
 
-    it("implementa OP-09, OP-13 y OP-17 tal como las declara", () => {
+    it("implementa OP-09, OP-13, OP-14 y OP-17 tal como las declara", () => {
       // El registro rechazaría al adaptador si declarara sin implementar, pero
       // conviene que el fallo se lea aquí y no en un mensaje de alta.
       assert.equal(typeof adapter.extendAnalysisSchema, "function");
       assert.equal(typeof adapter.verifyArtifact, "function");
+      assert.equal(typeof adapter.runTests, "function");
       assert.equal(typeof adapter.detectDependencies, "function");
     });
   });

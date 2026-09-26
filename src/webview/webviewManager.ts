@@ -11,7 +11,9 @@ import {
 } from "../llm";
 import type { ActiveEcosystem } from "../core/adapters";
 import {
+  supportsDependencyDetection,
   supportsSchemaExtension,
+  supportsTestRun,
   supportsVerification,
 } from "../core/contracts";
 import type {
@@ -24,15 +26,24 @@ import type {
 import {
   dependencyLabel,
   describeViolations,
+  readArtifact,
   renderProjectTree,
   resolveDependencies,
   writeArtifact,
   type ResolvedDependency,
 } from "../core/project";
 import {
-  presentVerification,
-  runVerificationStage,
+  TEST_RUN_STAGE_NAME,
+  presentRepairProgress,
+  presentRepairResult,
+  presentTestRun,
+  runTestStage,
   verificationStageName,
+  verifyAndRepair,
+  type RepairReply,
+  type RepairRequest,
+  type VerificationOutcome,
+  type VerificationPresentation,
 } from "../core/verification";
 import { runMethodSlicer } from "../agents/methodSlicer";
 import { runDependencyResolver } from "../agents/dependencyResolver";
@@ -81,6 +92,22 @@ type TestContext = {
 };
 const testContextByPanel = new WeakMap<vscode.WebviewPanel, TestContext>();
 
+/**
+ * Paneles con una verificación en curso, con su corrección automática. Mientras
+ * tanto no se acepta otra cosa que escriba la prueba: el corrector del chat o
+ * una generación nueva pisarían el archivo a mitad del ciclo.
+ */
+const verifyingPanels = new WeakSet<vscode.WebviewPanel>();
+
+/**
+ * Estado de la última verificación de cada panel. Reintentar solo la
+ * ejecución tiene que saber si la prueba compiló, sin volver a compilarla.
+ */
+const verificationStatusByPanel = new WeakMap<
+  vscode.WebviewPanel,
+  VerificationOutcome["status"]
+>();
+
 const tokenTotalsByPanel = new WeakMap<
   vscode.WebviewPanel,
   { inputTokens: number; outputTokens: number }
@@ -97,6 +124,15 @@ function addTokenUsage(
   totals.inputTokens += usage.inputTokens;
   totals.outputTokens += usage.outputTokens;
   tokenTotalsByPanel.set(panel, totals);
+}
+
+/** Copia de los totales: `addTokenUsage` modifica el objeto guardado. */
+function tokenTotals(panel: vscode.WebviewPanel) {
+  const totals = tokenTotalsByPanel.get(panel);
+  return {
+    inputTokens: totals?.inputTokens ?? 0,
+    outputTokens: totals?.outputTokens ?? 0,
+  };
 }
 
 // ── Model handlers ─────────────────────────────────────────────────────────────
@@ -155,36 +191,220 @@ async function askInChat(
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
- * Verifica el artefacto que ya está en disco (OP-13) y muestra el resultado
- * debajo de la prueba.
+ * Verifica el artefacto que ya está en disco (OP-13) y, mientras la
+ * verificación lo rechace con errores dentro de la prueba, se los pasa al
+ * corrector y vuelve a verificar. Cada paso se muestra debajo de la prueba.
  *
  * Corre después de mostrar la prueba y no antes: la verificación puede tardar
  * segundos o minutos, y la prueba ya está escrita y se puede leer mientras
  * tanto. Si el adaptador no ofrece verificación, la etapa se informa como no
  * aplicable sin lanzar nada.
  */
-async function verifyAndShow(
+async function verifyInPanel(
+  panel: vscode.WebviewPanel,
+  ecosystem: ActiveEcosystem,
+) {
+  const testCtx = testContextByPanel.get(panel);
+  const meta = generationMetaByPanel.get(panel);
+  const provider = meta && modelProviders[meta.model];
+  if (!testCtx || !meta || !provider || verifyingPanels.has(panel)) {
+    return;
+  }
+  verifyingPanels.add(panel);
+
+  const { adapter } = ecosystem;
+  const kind = adapter.capabilities.verification;
+  const { project, spec } = testCtx;
+  const outputRoot = project.rootPath;
+  const subModel = meta.subModel ?? undefined;
+  const showVerification = (verification: VerificationPresentation) =>
+    panel.webview.postMessage({ command: "showVerification", verification });
+
+  const fix = async ({
+    cycle,
+    code,
+    feedback,
+  }: RepairRequest): Promise<RepairReply> => {
+    const before = tokenTotals(panel);
+    const fixResult = await runChatFixer(
+      {
+        profile: testCtx.profile,
+        testCode: code,
+        assembledContext: testCtx.assembledContext,
+        userMessage: feedback,
+        className: meta.className,
+        methodName: meta.methodName,
+        workspaceRoot: outputRoot,
+        dumpDir: path.join("repair", `cycle-${cycle}`),
+      },
+      (prompt) => askOnce(provider, prompt, panel, subModel),
+    );
+    const after = tokenTotals(panel);
+    const usage = {
+      inputTokens: after.inputTokens - before.inputTokens,
+      outputTokens: after.outputTokens - before.outputTokens,
+    };
+
+    switch (fixResult.status) {
+      case "FIXED":
+        return {
+          status: "fixed",
+          code: fixResult.correctedCode,
+          summary: fixResult.summary,
+          usage,
+        };
+      case "INFO":
+        return {
+          status: "notFixed",
+          reason: `respondió sin corregir: ${fixResult.answer}`,
+          usage,
+        };
+      case "ERROR":
+        return { status: "notFixed", reason: fixResult.message, usage };
+    }
+  };
+
+  try {
+    // Los volcados son de la última verificación, igual que los de los
+    // agentes: sin borrar, un ciclo de una corrida anterior quedaría mezclado.
+    // Dentro del try: si el borrado fallara afuera, el panel quedaría marcado
+    // como ocupado para siempre.
+    fs.rmSync(path.join(outputRoot, "AgentOutputs", "repair"), {
+      recursive: true,
+      force: true,
+    });
+
+    const result = await verifyAndRepair({
+      adapter,
+      project,
+      spec,
+      fix,
+      onEvent: (event) => {
+        const fixerAgent = `Auto Fixer #${event.cycle}`;
+        switch (event.kind) {
+          case "verifying":
+            if (supportsVerification(adapter)) {
+              panel.webview.postMessage({
+                command: "verificationRunning",
+                stageName: verificationStageName(kind),
+              });
+            }
+            break;
+          case "fixing":
+            showVerification(
+              presentRepairProgress(
+                kind,
+                event.outcome,
+                event.cycle,
+                event.maxCycles,
+              ),
+            );
+            notifyAgent(panel, fixerAgent, "running");
+            break;
+          case "fixed":
+            testContextByPanel.set(panel, { ...testCtx, testCode: event.code });
+            notifyAgent(
+              panel,
+              fixerAgent,
+              "done",
+              event.summary ?? "Correcciones aplicadas",
+            );
+            panel.webview.postMessage({
+              command: "updateResult",
+              result: event.code,
+            });
+            break;
+          case "notFixed":
+            notifyAgent(panel, fixerAgent, "error", event.reason);
+            break;
+        }
+      },
+    });
+
+    const { outcome, ...record } = result;
+    saveAgentOutput(outputRoot, "verification", outcome);
+    saveAgentOutput(outputRoot, "repair", {
+      ...record,
+      finalStatus: outcome.status,
+    });
+    showVerification(presentRepairResult(kind, result));
+    verificationStatusByPanel.set(panel, outcome.status);
+
+    // ── OP-14: ejecución, solo con la prueba ya verificada ─────────────────
+    await executeInPanel(panel, ecosystem, project, spec, outcome.status);
+  } catch (err: any) {
+    // La prueba ya está escrita: un fallo aquí no invalida la generación.
+    showVerification({
+      stageName: verificationStageName(kind),
+      status: "notRun",
+      summary: `La verificación se interrumpió: ${err.message}`,
+      remediation: "Volvé a intentar la verificación.",
+      diagnostics: [],
+    });
+  } finally {
+    verifyingPanels.delete(panel);
+  }
+}
+
+/**
+ * Ejecuta las pruebas del artefacto (OP-14) y muestra los contadores debajo
+ * de la verificación. Quien llama tiene que haber marcado el panel como
+ * ocupado: la ejecución abre el mismo proyecto que la verificación.
+ */
+async function executeInPanel(
   panel: vscode.WebviewPanel,
   ecosystem: ActiveEcosystem,
   project: ProjectModel,
   spec: ArtifactSpec,
+  verification: VerificationOutcome["status"],
 ) {
   const { adapter } = ecosystem;
-  const kind = adapter.capabilities.verification;
-
-  if (supportsVerification(adapter)) {
+  const willRun =
+    supportsTestRun(adapter) &&
+    (verification === "passed" || verification === "notApplicable");
+  if (willRun) {
     panel.webview.postMessage({
-      command: "verificationRunning",
-      stageName: verificationStageName(kind),
+      command: "testRunRunning",
+      stageName: TEST_RUN_STAGE_NAME,
     });
   }
 
-  const outcome = await runVerificationStage(adapter, project, spec);
-  saveAgentOutput(project.rootPath, "verification", outcome);
-  panel.webview.postMessage({
-    command: "showVerification",
-    verification: presentVerification(kind, outcome),
+  const started = Date.now();
+  const outcome = await runTestStage(adapter, project, spec, verification);
+  // Fuera del tiempo de generación, como la verificación; se guarda aparte
+  // para medir cuánto cuesta ejecutar.
+  saveAgentOutput(project.rootPath, "test-run", {
+    ...outcome,
+    durationMs: Date.now() - started,
   });
+  panel.webview.postMessage({
+    command: "showTestRun",
+    testRun: presentTestRun(outcome, spec.unitName),
+  });
+}
+
+/** Solo la ejecución, con la última verificación del panel. */
+async function executeAgainInPanel(
+  panel: vscode.WebviewPanel,
+  ecosystem: ActiveEcosystem,
+) {
+  const testCtx = testContextByPanel.get(panel);
+  const verification = verificationStatusByPanel.get(panel);
+  if (!testCtx || !verification || verifyingPanels.has(panel)) {
+    return;
+  }
+  verifyingPanels.add(panel);
+  try {
+    await executeInPanel(
+      panel,
+      ecosystem,
+      testCtx.project,
+      testCtx.spec,
+      verification,
+    );
+  } finally {
+    verifyingPanels.delete(panel);
+  }
 }
 
 function notifyAgent(
@@ -275,6 +495,14 @@ async function handleGenerate(
   panel: vscode.WebviewPanel,
   ecosystem: ActiveEcosystem,
 ) {
+  if (verifyingPanels.has(panel)) {
+    panel.webview.postMessage({ command: "generationError" });
+    vscode.window.showWarningMessage(
+      "Hay una verificación en curso en este panel. Esperá a que termine para generar otra prueba.",
+    );
+    return;
+  }
+
   generationMetaByPanel.set(panel, { className, methodName, model, subModel });
 
   const generationStart = Date.now();
@@ -398,15 +626,42 @@ async function handleGenerate(
     }
     notifyAgent(panel, depAgent, "done");
 
-    // ── OP-07: resolución de las dependencias pedidas ────────────────────────
+    // ── OP-17 y OP-07: dependencias pedidas y detectadas ─────────────────────
+    // El agente decide qué pedir y a veces omite un tipo del proyecto que el
+    // código usa. Si el adaptador sabe detectarlos, se suman a lo pedido; si
+    // no, queda solo lo que pidió el agente, sin ninguna condición más.
     const depReferences: string[] =
       depResult.status === "MISSING_DEPENDENCIES" ? depResult.files : [];
+
+    let detectedReferences: readonly string[] = [];
+    let detectionError: string | undefined;
+    if (supportsDependencyDetection(adapter)) {
+      try {
+        // Sin recorte, `codeSlice` es el archivo entero: el foco limita la
+        // detección al método, como se le pide al agente.
+        detectedReferences = await adapter.detectDependencies(
+          project,
+          codeSlice,
+          reduceContext ? undefined : target,
+        );
+      } catch (err: any) {
+        // Complementa al agente: si falla, se sigue con lo que él pidió.
+        detectionError = err.message;
+      }
+    }
 
     const dependencies = await resolveDependencies(
       adapter,
       project,
       depReferences,
+      detectedReferences,
     );
+    saveAgentOutput(outputRoot, "dependencies", {
+      requested: depReferences,
+      detected: detectedReferences,
+      ...(detectionError === undefined ? {} : { detectionError }),
+      files: dependencies.files.map(({ content, ...file }) => file),
+    });
 
     if (dependencies.files.length > 0) {
       panel.webview.postMessage({
@@ -414,9 +669,16 @@ async function handleGenerate(
         files: dependencies.files.map((f) => ({
           path: dependencyLabel(f),
           found: f.found,
+          detected: f.detected,
         })),
       });
     }
+
+    // Solo las que se encontraron: con una referencia que no existe, el
+    // constructor de contexto gastaría una llamada sin nada que recortar.
+    const dependencyFiles = dependencies.files
+      .filter((f) => f.found)
+      .map(dependencyLabel);
 
     // ── Step 2: Context Builder ───────────────────────────────────────────────
     let preValidationContext: string;
@@ -427,7 +689,7 @@ async function handleGenerate(
         {
           profile,
           codeSlice,
-          dependencyFiles: depReferences,
+          dependencyFiles,
           resolvedDependencyCode: dependencies.code,
           className,
           methodName,
@@ -620,10 +882,11 @@ async function handleGenerate(
       totalTokens,
     });
 
-    // ── OP-13: verificación del artefacto escrito ────────────────────────────
-    // Fuera del tiempo de generación a propósito: mide al modelo, no al
-    // compilador.
-    await verifyAndShow(panel, ecosystem, project, spec);
+    // ── OP-13: verificación del artefacto escrito y corrección automática ───
+    // Fuera del tiempo y de los tokens de generación a propósito: esos miden
+    // al pipeline hasta la primera versión escrita. Lo que cuesta corregir
+    // queda registrado aparte, en el volcado `repair`.
+    await verifyInPanel(panel, ecosystem);
   } catch (err: any) {
     panel.webview.postMessage({ command: "agentError", message: err.message });
     vscode.window.showErrorMessage("Error al generar: " + err.message);
@@ -768,13 +1031,13 @@ export async function createWebviewPanel(
         break;
       }
 
-      case "verifyAgain": {
-        const testCtx = testContextByPanel.get(panel);
-        if (testCtx) {
-          await verifyAndShow(panel, ecosystem, testCtx.project, testCtx.spec);
-        }
+      case "verifyAgain":
+        await verifyInPanel(panel, ecosystem);
         break;
-      }
+
+      case "runTestsAgain":
+        await executeAgainInPanel(panel, ecosystem);
+        break;
 
       case "chatMessage": {
         const text = String(message.text || "").trim();
@@ -793,21 +1056,38 @@ export async function createWebviewPanel(
         const testCtx = testContextByPanel.get(panel);
 
         if (testCtx) {
+          if (verifyingPanels.has(panel)) {
+            panel.webview.postMessage({
+              command: "chatResponse",
+              text: "Hay una verificación en curso. Esperá a que termine para pedir otra corrección.",
+            });
+            return;
+          }
+
+          // Los volcados van a la raíz del proyecto, como los del pipeline, y
+          // no a la carpeta abierta: si se abrió una subcarpeta, caerían
+          // dentro del proyecto y el editor del ecosistema los importaría.
+          const outputRoot = testCtx.project.rootPath;
+
           // Route through ChatFixer: the agent has full context of the test + source
           notifyAgent(panel, "Chat Fixer", "running");
           const fixResult = await runChatFixer(
             {
               profile: testCtx.profile,
-              testCode: testCtx.testCode,
+              // El disco y no la última versión escrita: la persona puede haber
+              // editado la prueba, y el error que pega habla de ese texto.
+              testCode: await readArtifact(testCtx.project, testCtx.spec).catch(
+                () => testCtx.testCode,
+              ),
               assembledContext: testCtx.assembledContext,
               userMessage: text,
               className: meta.className,
               methodName: meta.methodName,
-              workspaceRoot: ecosystem.rootPath,
+              workspaceRoot: outputRoot,
             },
             (prompt) => askOnce(provider, prompt, panel, subModel),
           );
-          saveAgentOutput(ecosystem.rootPath, "chat-fixer", fixResult);
+          saveAgentOutput(outputRoot, "chat-fixer", fixResult);
 
           if (fixResult.status === "FIXED") {
             // Se normaliza igual que el código original: si el modelo renombró
@@ -832,12 +1112,7 @@ export async function createWebviewPanel(
             });
             // La verificación anterior era de la versión que se acaba de
             // reemplazar: se repite para que lo mostrado corresponda al disco.
-            await verifyAndShow(
-              panel,
-              ecosystem,
-              testCtx.project,
-              testCtx.spec,
-            );
+            await verifyInPanel(panel, ecosystem);
           } else if (fixResult.status === "INFO") {
             notifyAgent(panel, "Chat Fixer", "done");
             panel.webview.postMessage({

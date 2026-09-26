@@ -15,10 +15,9 @@
  * y con los archivos estructurados que producen. Hasta entonces, este archivo
  * es el primero que debe revisarse ante cualquier discrepancia.
  *
- * `VerificationResult` ya se contrastó con una herramienta real: la
- * compilación de Unity 2021.3 en modo batch. De ahí salieron dos cambios, el
- * estado `notRun` y la especificación del artefacto como entrada de OP-13.
- * Los tipos de OP-14 y OP-15 siguen sin contrastar.
+ * `VerificationResult` y `TestExecutionResult` ya se contrastaron con una
+ * herramienta real: Unity 2021.3 en modo batch. El de OP-15 sigue sin
+ * contrastar.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -101,30 +100,88 @@ export interface VerificationNotRun {
   readonly rawOutput?: string;
 }
 
-/** Prueba individual que no pasó. */
-export interface TestFailure {
-  /** Nombre de la prueba tal como lo reporta el ejecutor. */
+/**
+ * Cómo terminó una prueba. `skipped` reúne lo que no pasó ni falló: las
+ * omitidas y, en NUnit, las no concluyentes.
+ */
+export type TestCaseOutcome = "passed" | "failed" | "skipped";
+
+/**
+ * Una prueba individual de la corrida, haya pasado o no.
+ *
+ * Están todas y no solo las que fallan: para juzgar si la prueba generada
+ * sirve hay que ver qué casos cubre, y un caso que pasa también puede fijar
+ * como correcto un comportamiento dudoso del código.
+ */
+export interface TestCaseResult {
+  /** Nombre completo de la prueba tal como lo reporta el ejecutor. */
   readonly testName: string;
-  readonly message: string;
-  /** Traza de pila cuando el ejecutor la produce. */
+  readonly outcome: TestCaseOutcome;
+  /** Duración en milisegundos, cuando el ejecutor la reporta. */
+  readonly durationMs?: number;
+  /**
+   * Por qué falló, por qué se omitió o, en una que pasó, el mensaje con el
+   * que pasó. Ese último importa: una prueba que pasa declarándolo, sin
+   * comprobar nada, pasa igual que una que comprueba algo.
+   */
+  readonly message?: string;
+  /** Traza de pila de una prueba que falló, cuando el ejecutor la produce. */
   readonly stackTrace?: string;
 }
 
 /**
  * OP-14 — Resultado de ejecución.
  *
- * Los cuatro contadores son los que la interfaz presenta al terminar una
- * corrida: total, exitosas, fallidas y omitidas.
+ * Contrastado con Unity 2021.3 (`-runTests`, informe NUnit 3). De ahí salieron
+ * cuatro cambios respecto de la firma provisional:
+ *
+ *   · Tres estados, igual que la verificación. Con el editor abierto, o si el
+ *     proyecto no compila, no hay informe: sin `notRun` eso se leería como una
+ *     corrida con cero fallos.
+ *   · El informe se conserva como texto y no como ruta: el ejecutor lo deja
+ *     en una carpeta temporal que se borra al terminar.
+ *   · `skipped` incluye las no concluyentes. NUnit las cuenta aparte, pero no
+ *     pasaron ni fallaron, y la interfaz presenta cuatro contadores.
+ *   · Cada prueba con su resultado, y no solo las que fallaron: con los
+ *     contadores solos no se sabe qué casos cubre la prueba generada.
  */
-export interface TestExecutionResult {
+export type TestExecutionResult = TestRunPassed | TestRunFailed | TestRunNotRun;
+
+/** Lo que tienen en común los dos estados en los que las pruebas sí corrieron. */
+interface TestRunCompleted {
+  /** Siempre `passed + failed + skipped`. */
   readonly total: number;
   readonly passed: number;
   readonly failed: number;
   readonly skipped: number;
-  readonly failures: readonly TestFailure[];
+  /** Cada prueba, en el orden del informe. */
+  readonly cases: readonly TestCaseResult[];
   readonly exitCode: number;
-  /** Ruta del informe crudo producido por el ejecutor, si lo hubo. */
-  readonly rawReportPath?: string;
+  /** Informe crudo del ejecutor, conservado para diagnóstico y trazabilidad. */
+  readonly rawReport: string;
+}
+
+/** Corrieron y ninguna falló. Puede haber omitidas. */
+export interface TestRunPassed extends TestRunCompleted {
+  readonly status: "passed";
+}
+
+/** Corrieron y al menos una falló. */
+export interface TestRunFailed extends TestRunCompleted {
+  readonly status: "failed";
+}
+
+/**
+ * No se llegó a ejecutar ninguna prueba: la herramienta no está, otro proceso
+ * tiene el proyecto, la prueba no compila, se agotó el tiempo o el filtro no
+ * encontró ninguna prueba. Un informe con cero pruebas cae aquí y no en
+ * `passed`: Unity termina con código 0 aunque no haya ejecutado nada.
+ */
+export interface TestRunNotRun {
+  readonly status: "notRun";
+  readonly blocker: PreconditionViolation;
+  /** Salida cruda, cuando la herramienta llegó a arrancar. */
+  readonly rawOutput?: string;
 }
 
 /** Porcentaje cubierto junto con los conteos que lo sustentan. */

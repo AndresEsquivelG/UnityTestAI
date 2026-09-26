@@ -337,4 +337,22 @@
 .verification__diagnostic--error { color: #f07178; }
 .verification__diagnostic--warning { color: #ffcb6b; }
 
+.verification__cases {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid #333;
+}
+
+.verification__case {
+  padding: 1px 0;
+  font-family: monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.verification__case--passed { color: #9ccc9c; }
+.verification__case--failed { color: #f07178; }
+.verification__case--skipped { color: #ffcb6b; }
+
 .verification__retry { margin-top: 8px; font-size: 11px; }

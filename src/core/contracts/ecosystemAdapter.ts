@@ -169,6 +169,10 @@ export interface EcosystemAdapter {
   /**
    * OP-14 — Ejecución de las pruebas generadas. OPCIONAL.
    * Presente si y solo si `capabilities.runTests` es true.
+   *
+   * Ejecuta solo las pruebas del artefacto que describe `spec`, no las del
+   * proyecto entero: el resultado tiene que hablar de la prueba generada, y
+   * las demás pueden tardar o fallar por su cuenta.
    */
   runTests?(project: ProjectModel, spec: ArtifactSpec): Promise<TestExecutionResult>;
 

@@ -1,5 +1,3 @@
-import * as fsp from "fs/promises";
-import * as os from "os";
 import * as path from "path";
 import type {
   ArtifactSpec,
@@ -8,7 +6,14 @@ import type {
   ProjectModel,
   VerificationResult,
 } from "../../core/contracts";
-import type { UnityEditorToolchain } from "./editor";
+import {
+  BATCH_TIMEOUT_MS,
+  batchBlocker,
+  prepareEditor,
+  runInBatch,
+  type BatchActivity,
+} from "./batch";
+import type { EditorRunResult, UnityEditorToolchain } from "./editor";
 
 /**
  * OP-13 — Compilación del proyecto Unity con la prueba ya escrita.
@@ -26,14 +31,14 @@ import type { UnityEditorToolchain } from "./editor";
  * `.meta` de la prueba nueva y actualiza `Library`.
  */
 
-/**
- * Tiempo máximo de una compilación. Holgado a propósito: sin `Library`, la
- * primera apertura importa todos los recursos del proyecto.
- */
-export const COMPILE_TIMEOUT_MS = 10 * 60 * 1000;
+/** Tiempo máximo de una compilación. */
+export const COMPILE_TIMEOUT_MS = BATCH_TIMEOUT_MS;
 
-/** Mensaje con el que el modo batch rechaza un proyecto abierto en otro editor. */
-const PROJECT_OPEN_MESSAGE = "another Unity instance is running with this project open";
+const COMPILE: BatchActivity = {
+  doing: "compilar",
+  retry: "la compilación",
+  timeoutCode: "unity.compile-timeout",
+};
 
 /**
  * Diagnóstico del compilador tal como lo escribe Unity en el log:
@@ -53,95 +58,38 @@ export async function compileUnityProject(
 ): Promise<VerificationResult> {
   const { toolchain } = options;
 
-  const version = project.adapterData?.["unityVersion"];
-  if (typeof version !== "string") {
-    return notRun({
-      code: "unity.editor-version-unknown",
-      message: "No se pudo leer la versión del editor del proyecto.",
-      remediation:
-        'Abrí el proyecto una vez con Unity Hub para que se genere "ProjectSettings/ProjectVersion.txt".',
-    });
+  const editor = await prepareEditor(project, toolchain, COMPILE);
+  if ("blocker" in editor) {
+    return notRun(editor.blocker);
   }
 
-  const executable = await toolchain.findEditor(version);
-  if (!executable) {
-    return notRun({
-      code: "unity.editor-not-installed",
-      message: `No se encontró instalado el editor de Unity ${version}, que es el que usa el proyecto.`,
-      remediation: `Instalá Unity ${version} desde Unity Hub.`,
-    });
-  }
-
-  // Se comprueba antes de lanzar para no gastar el arranque del editor: con el
-  // proyecto abierto, el modo batch tarda unos 8 s en rendirse.
-  if (await toolchain.isProjectOpen(project.rootPath)) {
-    return notRun(projectOpenBlocker());
-  }
-
-  const workDir = await fsp.mkdtemp(path.join(os.tmpdir(), "utia-unity-"));
-  const logFile = path.join(workDir, "compile.log");
-  try {
-    const run = await toolchain.run(
-      executable,
-      ["-batchmode", "-quit", "-nographics", "-projectPath", project.rootPath, "-logFile", logFile],
-      options.timeoutMs ?? COMPILE_TIMEOUT_MS
-    );
-    const log = await readLog(logFile);
-    const artifactPath = `${spec.directory}/${spec.fileName}${spec.extension}`;
-    return classifyRun(run, log, project.rootPath, artifactPath);
-  } finally {
-    await removeWorkDir(workDir);
-  }
-}
-
-/**
- * Cuando el editor termina, un proceso hijo suyo sigue reteniendo el log unos
- * instantes: medido en Windows, borrarlo enseguida da `EBUSY` y a los ~0,4 s
- * ya se puede. Se reintenta, y si aun así no se puede, se deja el archivo en la
- * carpeta temporal: perder el resultado por eso sería peor.
- */
-async function removeWorkDir(workDir: string): Promise<void> {
-  try {
-    await fsp.rm(workDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  } catch {
-    // Queda en la carpeta temporal del sistema; el resultado no depende de él.
-  }
+  const artifactPath = `${spec.directory}/${spec.fileName}${spec.extension}`;
+  return runInBatch(
+    toolchain,
+    editor.executable,
+    (_workDir, logFile) => [
+      "-batchmode",
+      "-quit",
+      "-nographics",
+      "-projectPath",
+      project.rootPath,
+      "-logFile",
+      logFile,
+    ],
+    options.timeoutMs ?? COMPILE_TIMEOUT_MS,
+    async (run, log) => classifyRun(run, log, project.rootPath, artifactPath)
+  );
 }
 
 function classifyRun(
-  run: Awaited<ReturnType<UnityEditorToolchain["run"]>>,
+  run: EditorRunResult,
   log: string,
   rootPath: string,
   artifactPath: string
 ): VerificationResult {
-  if (run.spawnError) {
-    return notRun(
-      {
-        code: "unity.editor-failed-to-start",
-        message: `No se pudo lanzar el editor de Unity: ${run.spawnError}`,
-        remediation: "Comprobá que el editor esté bien instalado abriéndolo desde Unity Hub.",
-      },
-      log
-    );
-  }
-
-  if (run.timedOut) {
-    return notRun(
-      {
-        code: "unity.compile-timeout",
-        message: "Unity no terminó de compilar a tiempo y se detuvo.",
-        remediation:
-          "Abrí el proyecto una vez en el editor para que termine de importarlo, cerralo y volvé a intentar la compilación.",
-      },
-      log
-    );
-  }
-
-  // En macOS y Linux el bloqueo no se detecta de antemano; este es el aviso
-  // que queda. En Windows también llega aquí si el editor se abrió entre la
-  // comprobación y el arranque.
-  if (log.includes(PROJECT_OPEN_MESSAGE)) {
-    return notRun(projectOpenBlocker(), log);
+  const blocker = batchBlocker(run, log, COMPILE);
+  if (blocker) {
+    return notRun(blocker, log);
   }
 
   const exitCode = run.exitCode ?? -1;
@@ -230,25 +178,8 @@ function samePath(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
 
-function projectOpenBlocker(): PreconditionViolation {
-  return {
-    code: "unity.project-open",
-    message: "El proyecto está abierto en el editor de Unity, y el modo batch no puede compilarlo a la vez.",
-    remediation: "Cerrá el editor de Unity y volvé a intentar la compilación. La prueba ya quedó escrita.",
-  };
-}
-
 function notRun(blocker: PreconditionViolation, rawOutput?: string): VerificationResult {
   return rawOutput === undefined
     ? { status: "notRun", blocker }
     : { status: "notRun", blocker, rawOutput };
-}
-
-async function readLog(logFile: string): Promise<string> {
-  try {
-    return await fsp.readFile(logFile, "utf8");
-  } catch {
-    // El editor no llegó a crear el log: se clasifica con lo que haya.
-    return "";
-  }
 }
