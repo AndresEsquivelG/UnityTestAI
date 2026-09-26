@@ -22,18 +22,29 @@ function model(relativePaths: string[]): ProjectModel {
     sourceRoot: "main",
   }));
 
-  return { rootPath: "/proyecto", ecosystemId: "inventado", sourceRoots: [], sources };
+  return {
+    rootPath: "/proyecto",
+    ecosystemId: "inventado",
+    sourceRoots: [],
+    sources,
+  };
 }
 
 describe("dibujo del modelo del proyecto", () => {
   it("dibuja la jerarquía con dos espacios por nivel", () => {
     const tree = renderProjectTree(
-      model(["src/main/Player.java", "src/main/Enemy.java", "pom.xml"])
+      model(["src/main/Player.java", "src/main/Enemy.java", "pom.xml"]),
     );
 
     assert.equal(
       tree,
-      ["- src", "  - main", "    - Enemy.java", "    - Player.java", "- pom.xml"].join("\n")
+      [
+        "- src",
+        "  - main",
+        "    - Enemy.java",
+        "    - Player.java",
+        "- pom.xml",
+      ].join("\n"),
     );
   });
 
@@ -53,7 +64,7 @@ describe("dibujo del modelo del proyecto", () => {
 
     assert.equal(
       renderProjectTree(model(paths)),
-      renderProjectTree(model([...paths].reverse()))
+      renderProjectTree(model([...paths].reverse())),
     );
   });
 });
@@ -78,7 +89,10 @@ describe("presentación de los incumplimientos", () => {
       { code: "b", message: "Falta el descriptor.", remediation: "Agregalo." },
     ]);
 
-    assert.equal(text, "Falta la carpeta.\n  → Creála.\nFalta el descriptor.\n  → Agregalo.");
+    assert.equal(
+      text,
+      "Falta la carpeta.\n  → Creála.\nFalta el descriptor.\n  → Agregalo.",
+    );
   });
 
   it("devuelve la cadena vacía cuando no hay ninguno", () => {
@@ -89,33 +103,45 @@ describe("presentación de los incumplimientos", () => {
 describe("lectura de las dependencias resueltas", () => {
   /** Adaptador inventado que resuelve solo las referencias indicadas. */
   function resolver(
-    resolve: (reference: string) => DependencyResolution
+    resolve: (reference: string) => DependencyResolution,
   ): EcosystemAdapter {
     return createStubAdapter({
       id: "resolvedor",
-      override: { resolveDependency: async (_project, reference) => resolve(reference) },
+      override: {
+        resolveDependency: async (_project, reference) => resolve(reference),
+      },
     });
   }
 
   it("concatena lo encontrado y anota lo que no se pudo resolver", async () => {
     const adapter = resolver((reference) =>
       reference === "Player"
-        ? { resolved: true, relativePath: "Assets/Scripts/Player.cs", content: "class Player {}" }
-        : { resolved: false, reference, triedPaths: [`${reference}.cs`] }
+        ? {
+            resolved: true,
+            relativePath: "Assets/Scripts/Player.cs",
+            content: "class Player {}",
+          }
+        : { resolved: false, reference, triedPaths: [`${reference}.cs`] },
     );
 
-    const result = await resolveDependencies(adapter, model([]), ["Player", "Fantasma"]);
+    const result = await resolveDependencies(adapter, model([]), [
+      "Player",
+      "Fantasma",
+    ]);
 
     assert.equal(
       result.code,
-      "\n\n// File: Assets/Scripts/Player.cs\nclass Player {}"
+      "\n\n// File: Assets/Scripts/Player.cs\nclass Player {}",
     );
     assert.deepEqual(
-      result.files.map((file) => ({ reference: file.reference, found: file.found })),
+      result.files.map((file) => ({
+        reference: file.reference,
+        found: file.found,
+      })),
       [
         { reference: "Player", found: true },
         { reference: "Fantasma", found: false },
-      ]
+      ],
     );
   });
 
