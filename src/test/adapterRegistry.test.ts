@@ -89,6 +89,24 @@ describe("registro de adaptadores", () => {
       ]);
     });
 
+    it("ata la detección de dependencias a OP-17 en los dos sentidos", () => {
+      const sinOperacion = createStubAdapter({
+        id: "promete",
+        capabilities: { dependencyDetection: true },
+      });
+      const sinDeclarar = createStubAdapter({
+        id: "calla",
+        optional: { detectDependencies: async () => [] },
+      });
+
+      assert.deepEqual(findCapabilityMismatches(sinOperacion), [
+        'declara la capacidad "dependencyDetection" pero no implementa detectDependencies()',
+      ]);
+      assert.deepEqual(findCapabilityMismatches(sinDeclarar), [
+        'implementa detectDependencies() pero no declara la capacidad "dependencyDetection"',
+      ]);
+    });
+
     it("acepta un adaptador coherente", () => {
       const coherente = createStubAdapter({
         id: "coherente",

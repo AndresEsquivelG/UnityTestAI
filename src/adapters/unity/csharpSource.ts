@@ -160,6 +160,36 @@ export function findMethodDeclarations(
   methodName: string,
   maxDepth = 0
 ): MethodDeclaration[] {
+  return scanMethods(masked, original, range, methodName, maxDepth).map(
+    (method) => method.declaration
+  );
+}
+
+/**
+ * Extensión de cada declaración de un método, desde el comienzo de la
+ * declaración hasta el final del cuerpo, con las mismas reglas que
+ * `findMethodDeclarations`. Un cuerpo de expresión (`=>`) termina en el
+ * primer `;`.
+ */
+export function findMethodExtents(
+  masked: string,
+  original: string,
+  range: SourceRange,
+  methodName: string,
+  maxDepth = 0
+): SourceRange[] {
+  return scanMethods(masked, original, range, methodName, maxDepth).map(
+    (method) => method.extent
+  );
+}
+
+function scanMethods(
+  masked: string,
+  original: string,
+  range: SourceRange,
+  methodName: string,
+  maxDepth: number
+): { declaration: MethodDeclaration; extent: SourceRange }[] {
   const name = escapeForRegExp(methodName);
   const pattern = new RegExp(
     // Ni pegado a un punto ni a otro identificador: eso sería una invocación.
@@ -171,7 +201,7 @@ export function findMethodDeclarations(
       String.raw`\s*\(`
   );
 
-  const declarations: MethodDeclaration[] = [];
+  const declarations: { declaration: MethodDeclaration; extent: SourceRange }[] = [];
   const lineOffsets = computeLineOffsets(original);
 
   for (const line of splitLines(masked, range)) {
@@ -206,13 +236,32 @@ export function findMethodDeclarations(
 
     const declarationStart = line.start + (text.length - text.replace(/^\s+/, "").length);
     declarations.push({
-      line: lineNumberAt(lineOffsets, nameIndex),
-      column: nameIndex - lineOffsets[lineNumberAt(lineOffsets, nameIndex) - 1] + 1,
-      signature: original.slice(declarationStart, parenClose + 1).replace(/\s+/g, " ").trim(),
+      declaration: {
+        line: lineNumberAt(lineOffsets, nameIndex),
+        column: nameIndex - lineOffsets[lineNumberAt(lineOffsets, nameIndex) - 1] + 1,
+        signature: original.slice(declarationStart, parenClose + 1).replace(/\s+/g, " ").trim(),
+      },
+      extent: { start: declarationStart, end: bodyEnd(masked, parenClose) },
     });
   }
 
   return declarations;
+}
+
+/** Final del cuerpo de un método cuya lista de parámetros cierra en `parenClose`. */
+function bodyEnd(masked: string, parenClose: number): number {
+  const open = masked.indexOf("{", parenClose + 1);
+  const arrow = masked.indexOf("=>", parenClose + 1);
+
+  if (arrow !== -1 && (open === -1 || arrow < open)) {
+    const semicolon = masked.indexOf(";", arrow);
+    return semicolon === -1 ? masked.length : semicolon + 1;
+  }
+  if (open === -1) {
+    return parenClose + 1;
+  }
+  const close = findClosing(masked, open, "{", "}");
+  return close === -1 ? masked.length : close + 1;
 }
 
 export function escapeForRegExp(value: string): string {

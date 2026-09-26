@@ -106,6 +106,8 @@ export interface CapabilityMap {
   readonly analysisSchemaExtension: boolean;
   /** OP-16 — preparación previa y limpieza posterior. */
   readonly lifecycle: boolean;
+  /** OP-17 — detección de las dependencias del proyecto en el código de la unidad. */
+  readonly dependencyDetection: boolean;
 }
 
 /**

@@ -14,7 +14,7 @@ import type {
  * prueba falla en voz alta en lugar de pasar con un valor inventado.
  *
  * No es el adaptador ficticio que hará falta cuando Unity declare capacidades
- * verdaderas: ese tendrá que responder de verdad a las dieciséis operaciones.
+ * verdaderas: ese tendrá que responder de verdad a las diecisiete operaciones.
  */
 
 /** Operaciones opcionales que el adaptador de mentira puede llegar a declarar. */
@@ -26,6 +26,7 @@ type OptionalOperations = Pick<
   | "extendAnalysisSchema"
   | "prepare"
   | "cleanup"
+  | "detectDependencies"
 >;
 
 export interface StubAdapterOptions {
@@ -54,6 +55,7 @@ const NO_CAPABILITIES: CapabilityMap = {
   coverage: false,
   analysisSchemaExtension: false,
   lifecycle: false,
+  dependencyDetection: false,
 };
 
 const NOT_APPLICABLE: ApplicabilityResult = {

@@ -3,6 +3,7 @@ import { after, before, describe, it } from "node:test";
 import * as fsp from "fs/promises";
 import * as path from "path";
 import { UnityAdapter } from "../adapters/unity/unityAdapter";
+import { declaredTypeNames } from "../adapters/unity/dependencies";
 import type { ProjectModel, SymbolCandidate } from "../core/contracts";
 import { createUnityFixture, type UnityFixture } from "./support/unityFixture";
 
@@ -185,6 +186,131 @@ describe("adaptador de Unity", () => {
     });
   });
 
+  describe("OP-17 · detección de dependencias", () => {
+    it("detecta el tipo de un parámetro cuyos miembros usa el método", async () => {
+      // El caso que el agente resolutor omitió con qwen2.5:14b y con Haiku.
+      const slice = `using UnityEngine;
+
+public static class Utilities
+{
+    public static bool AreNeighbors(Player s1, Player s2)
+    {
+        return Mathf.Abs(s1.Column - s2.Column) <= 1;
+    }
+}`;
+
+      assert.deepEqual(await adapter.detectDependencies(project, slice), [
+        "Assets/Scripts/Player.cs",
+      ]);
+    });
+
+    it("no devuelve el archivo del tipo que el propio código declara", async () => {
+      const slice = `public class Enemy : MonoBehaviour
+{
+    private Player target;
+
+    public void Chase()
+    {
+        target.Move(2f);
+    }
+}`;
+
+      assert.deepEqual(await adapter.detectDependencies(project, slice), [
+        "Assets/Scripts/Player.cs",
+      ]);
+    });
+
+    it("no cuenta los nombres que solo aparecen en comentarios y cadenas", async () => {
+      const slice = `public class Hud
+{
+    // Muestra la vida del Player.
+    public string Label() { return "Enemy"; }
+}`;
+
+      assert.deepEqual(await adapter.detectDependencies(project, slice), []);
+    });
+
+    it("deja afuera las pruebas y el código de terceros de Plugins", async () => {
+      const helper = path.join(fixture.testsDir, "TestHelper.cs");
+      const tween = path.join(fixture.assetsDir, "Plugins", "Tween", "Tweener.cs");
+      await fsp.writeFile(helper, "public class TestHelper { }\n", "utf8");
+      await fsp.mkdir(path.dirname(tween), { recursive: true });
+      await fsp.writeFile(tween, "public class Tweener { }\n", "utf8");
+      try {
+        const withExtras = await adapter.buildProjectModel(fixture.projectRoot);
+        assert.ok(
+          withExtras.sources.some((source) => source.relativePath.endsWith("Tweener.cs")),
+          "el modelo sí incluye Plugins: la exclusión es de la detección"
+        );
+
+        const slice = "public class Uso { TestHelper a; Tweener b; Player c; }";
+
+        assert.deepEqual(await adapter.detectDependencies(withExtras, slice), [
+          "Assets/Scripts/Player.cs",
+        ]);
+      } finally {
+        await fsp.rm(helper, { force: true });
+        await fsp.rm(path.dirname(tween), { recursive: true, force: true });
+      }
+    });
+
+    describe("con foco en la unidad, sobre el archivo entero", () => {
+      const file = `public class Board
+{
+    private Enemy boss;
+
+    public bool Near(Player a) => a != null;
+
+    public void Spawn()
+    {
+        boss = new Enemy();
+    }
+
+    public int Count() { return Near(null) ? 1 : 0; }
+}`;
+
+      it("solo cuenta lo que usa el método", async () => {
+        const detected = await adapter.detectDependencies(project, file, {
+          className: "Board",
+          methodName: "Spawn",
+        });
+
+        assert.deepEqual(detected, ["Assets/Scripts/Enemy.cs"]);
+      });
+
+      it("un cuerpo de expresión termina en su punto y coma", async () => {
+        const detected = await adapter.detectDependencies(project, file, {
+          className: "Board",
+          methodName: "Near",
+        });
+
+        assert.deepEqual(detected, ["Assets/Scripts/Player.cs"]);
+      });
+
+      it("sin foco cuenta el archivo entero", async () => {
+        assert.deepEqual(await adapter.detectDependencies(project, file), [
+          "Assets/Scripts/Enemy.cs",
+          "Assets/Scripts/Player.cs",
+        ]);
+      });
+
+      it("si el método no aparece, cuenta el archivo entero antes que nada", async () => {
+        const detected = await adapter.detectDependencies(project, file, {
+          className: "Board",
+          methodName: "NoExiste",
+        });
+
+        assert.equal(detected.length, 2);
+      });
+    });
+
+    it("una restricción `where T : class` no declara un tipo llamado `where`", () => {
+      const masked = "class Pool<T> where T : class\n    where U : struct { }";
+
+      assert.deepEqual(declaredTypeNames(masked), ["Pool"]);
+    });
+  });
+
   describe("OP-10 y OP-11 · artefacto de prueba", () => {
     const location: SymbolCandidate = {
       filePath: "Assets/Scripts/Player.cs",
@@ -279,7 +405,7 @@ describe("adaptador de Unity", () => {
   });
 
   describe("OP-03 · capacidades declaradas", () => {
-    it("declara la extensión del esquema y la compilación, y ninguna otra", () => {
+    it("declara la extensión del esquema, la compilación y la detección de dependencias, y ninguna otra", () => {
       // Las tres en falso son ciertas hoy: el pipeline no ejecuta pruebas, no
       // mide cobertura y no tiene artefactos temporales que preparar ni limpiar.
       assert.deepEqual(adapter.capabilities, {
@@ -288,14 +414,16 @@ describe("adaptador de Unity", () => {
         coverage: false,
         analysisSchemaExtension: true,
         lifecycle: false,
+        dependencyDetection: true,
       });
     });
 
-    it("implementa OP-09 y OP-13 tal como las declara", () => {
+    it("implementa OP-09, OP-13 y OP-17 tal como las declara", () => {
       // El registro rechazaría al adaptador si declarara sin implementar, pero
       // conviene que el fallo se lea aquí y no en un mensaje de alta.
       assert.equal(typeof adapter.extendAnalysisSchema, "function");
       assert.equal(typeof adapter.verifyArtifact, "function");
+      assert.equal(typeof adapter.detectDependencies, "function");
     });
   });
 });

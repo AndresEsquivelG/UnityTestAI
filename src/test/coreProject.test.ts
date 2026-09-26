@@ -157,6 +157,51 @@ describe("lectura de las dependencias resueltas", () => {
     assert.equal(result.files[0].relativePath, "Assets/Scripts/Player.cs");
   });
 
+  it("suma las detectadas después de las pedidas y marca su origen", async () => {
+    const adapter = resolver((reference) => ({
+      resolved: true,
+      relativePath: `Assets/Scripts/${reference}.cs`,
+      content: `class ${reference} {}`,
+    }));
+
+    const result = await resolveDependencies(
+      adapter,
+      model([]),
+      ["Board"],
+      ["Shape"],
+    );
+
+    assert.deepEqual(
+      result.files.map((file) => [file.reference, file.detected]),
+      [
+        ["Board", false],
+        ["Shape", true],
+      ],
+    );
+    assert.match(result.code, /class Board \{\}[\s\S]*class Shape \{\}/);
+  });
+
+  it("no repite un archivo que el agente pidió y el adaptador también detectó", async () => {
+    // El agente lo nombra por la ruta y el adaptador por otra forma: los dos
+    // se resuelven al mismo archivo, y el contexto lo recibiría dos veces.
+    const adapter = resolver(() => ({
+      resolved: true,
+      relativePath: "Assets/Scripts/Shape.cs",
+      content: "class Shape {}",
+    }));
+
+    const result = await resolveDependencies(
+      adapter,
+      model([]),
+      ["Assets/Scripts/Shape.cs", "Shape"],
+      ["Assets/Scripts/Shape.cs"],
+    );
+
+    assert.equal(result.files.length, 1);
+    assert.equal(result.files[0].detected, false, "cuenta como pedida por el agente");
+    assert.equal(result.code, "\n\n// File: Assets/Scripts/Shape.cs\nclass Shape {}");
+  });
+
   it("no lee nada cuando el agente no pidió dependencias", async () => {
     // El adaptador de mentira lanza en `resolveDependency`: si se invocara, la
     // prueba fallaría.

@@ -25,14 +25,16 @@ import type {
 } from "./verification";
 
 /**
- * Interfaz de adaptación: las dieciséis operaciones comunes a todo ecosistema,
- * OP-01 a OP-16.
+ * Interfaz de adaptación: las diecisiete operaciones comunes a todo
+ * ecosistema, OP-01 a OP-17. Las dieciséis primeras son las de la tabla de
+ * operaciones original; OP-17 se agregó después (ver `detectDependencies`).
  *
  * DIVISIÓN OBLIGATORIA / OPCIONAL
  *
- * Las once operaciones obligatorias son miembros requeridos. Las cinco
- * opcionales —OP-09, OP-13, OP-14, OP-15 y OP-16— son miembros opcionales de la
- * interfaz, además de estar declaradas en `capabilities`. La doble declaración
+ * Las once operaciones obligatorias son miembros requeridos. Las seis
+ * opcionales —OP-09, OP-13, OP-14, OP-15, OP-16 y OP-17— son miembros
+ * opcionales de la interfaz, además de estar declaradas en `capabilities`. La
+ * doble declaración
  * es deliberada:
  *
  *   · el miembro opcional permite que un adaptador incompleto compile;
@@ -82,6 +84,31 @@ export interface EcosystemAdapter {
    * física dentro del proyecto.
    */
   resolveDependency(project: ProjectModel, reference: string): Promise<DependencyResolution>;
+
+  /**
+   * OP-17 — Detección de las dependencias del proyecto que usa un código.
+   * OPCIONAL. Presente si y solo si `capabilities.dependencyDetection` es true.
+   *
+   * Devuelve referencias que OP-07 sabe resolver: las de los archivos del
+   * proyecto que declaran tipos usados en `code` y no declarados en él. El
+   * núcleo las suma a las que pide el agente resolutor, no las reemplaza.
+   *
+   * `focus` llega cuando `code` es el archivo entero y no un recorte: limita
+   * la detección a lo que usa esa unidad, igual que se le pide al agente. Un
+   * recorte, en cambio, ya trae solo los miembros que la unidad usa, y entre
+   * ellos los campos cuyo tipo también es una dependencia.
+   *
+   * No está en la tabla de operaciones original, que deja la identificación
+   * de las dependencias al agente resolutor y solo la traducción a ruta al
+   * adaptador. Existe porque ese agente omite tipos del proyecto con varios
+   * modelos, y reconocer qué nombres son tipos del proyecto exige las reglas
+   * de declaración del lenguaje: conocimiento del ecosistema.
+   */
+  detectDependencies?(
+    project: ProjectModel,
+    code: string,
+    focus?: UnitTarget
+  ): Promise<readonly string[]>;
 
   // ── Generación ───────────────────────────────────────────────────────────
 
@@ -191,6 +218,10 @@ export type CoverageAdapter = EcosystemAdapter &
 export type SchemaExtendingAdapter = EcosystemAdapter &
   Required<Pick<EcosystemAdapter, "extendAnalysisSchema">>;
 
+/** Adaptador que sí detecta dependencias en el código (OP-17). */
+export type DependencyDetectingAdapter = EcosystemAdapter &
+  Required<Pick<EcosystemAdapter, "detectDependencies">>;
+
 /**
  * La guarda no distingue compilación de comprobación de importabilidad: para el
  * núcleo son la misma etapa. Esa diferencia es de presentación y se lee en
@@ -214,5 +245,14 @@ export function supportsSchemaExtension(
   return (
     a.capabilities.analysisSchemaExtension &&
     typeof a.extendAnalysisSchema === "function"
+  );
+}
+
+export function supportsDependencyDetection(
+  a: EcosystemAdapter
+): a is DependencyDetectingAdapter {
+  return (
+    a.capabilities.dependencyDetection &&
+    typeof a.detectDependencies === "function"
   );
 }
