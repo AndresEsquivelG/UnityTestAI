@@ -15,6 +15,7 @@ import type {
   SymbolCandidate,
   SymbolLocation,
   UnitTarget,
+  VerificationResult,
 } from "../../core/contracts";
 import { detectUnityProject } from "./detection";
 import { buildUnityProjectModel } from "./projectModel";
@@ -22,22 +23,38 @@ import { locateUnitSymbol, readUnitSource, resolveUnityDependency } from "./symb
 import { unityPromptProfile } from "./promptProfile";
 import { unityAnalysisSchema } from "./analysisSchema";
 import { checkUnityPreconditions, normalizeUnityCode, specifyUnityArtifact } from "./artifact";
+import { compileUnityProject } from "./compilation";
+import { systemEditorToolchain, type UnityEditorToolchain } from "./editor";
+
+export interface UnityAdapterOptions {
+  /**
+   * Editor con el que se compila. Por defecto, el instalado en la máquina; las
+   * pruebas lo reemplazan para no depender de una instalación de Unity.
+   */
+  readonly toolchain?: UnityEditorToolchain;
+}
 
 /**
  * Adaptador del ecosistema Unity / C#.
  *
  * Primera implementación de la interfaz de adaptación. Cubre las once
- * operaciones obligatorias y una de las cinco opcionales, OP-09.
+ * operaciones obligatorias y dos de las cinco opcionales: OP-09 y OP-13, que
+ * compila el proyecto con el editor de Unity en modo batch.
  *
- * Las otras cuatro se declaran en falso porque hoy es cierto: en el proyecto no
- * hay una sola invocación de compilación, de ejecución de pruebas ni de
- * recolección de cobertura. Cuando se implementen, esta declaración cambia aquí
- * y el núcleo no se entera.
+ * Ejecución, cobertura y ciclo de vida se declaran en falso porque hoy es
+ * cierto. Cuando se implementen, esta declaración cambia aquí y el núcleo no se
+ * entera.
  *
- * Nada de este archivo depende del editor: el adaptador recibe rutas y devuelve
- * datos, de modo que se puede ejercitar sin abrir el entorno.
+ * Nada de este archivo depende del editor de código: el adaptador recibe rutas
+ * y devuelve datos, de modo que se puede ejercitar sin abrir el entorno.
  */
 export class UnityAdapter implements EcosystemAdapter {
+  private readonly toolchain: UnityEditorToolchain;
+
+  constructor(options: UnityAdapterOptions = {}) {
+    this.toolchain = options.toolchain ?? systemEditorToolchain;
+  }
+
   readonly descriptor: AdapterDescriptor = {
     id: "unity",
     displayName: "Unity / C#",
@@ -46,7 +63,7 @@ export class UnityAdapter implements EcosystemAdapter {
   };
 
   readonly capabilities: CapabilityMap = {
-    verification: "none",
+    verification: "compile",
     runTests: false,
     coverage: false,
     analysisSchemaExtension: true,
@@ -94,5 +111,9 @@ export class UnityAdapter implements EcosystemAdapter {
     spec: ArtifactSpec
   ): Promise<readonly PreconditionViolation[]> {
     return checkUnityPreconditions(project, spec);
+  }
+
+  verifyArtifact(project: ProjectModel, spec: ArtifactSpec): Promise<VerificationResult> {
+    return compileUnityProject(project, spec, { toolchain: this.toolchain });
   }
 }

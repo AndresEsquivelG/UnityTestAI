@@ -75,6 +75,9 @@ export type {
   FileCoverage,
   TestExecutionResult,
   TestFailure,
+  VerificationFailed,
+  VerificationNotRun,
+  VerificationPassed,
   VerificationResult,
 } from "./verification";
 

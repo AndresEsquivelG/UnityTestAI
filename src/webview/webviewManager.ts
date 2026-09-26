@@ -3,9 +3,17 @@ import * as fs from "fs";
 import * as path from "path";
 import { collectClassAndMethod } from "../collectInputs";
 import { ChatSession, type ChatMessage } from "../llm/sessionManager";
-import { generateWithChatGPT, generateWithOllama, generateWithClaude, type LLMResult } from "../llm";
+import {
+  generateWithChatGPT,
+  generateWithOllama,
+  generateWithClaude,
+  type LLMResult,
+} from "../llm";
 import type { ActiveEcosystem } from "../core/adapters";
-import { supportsSchemaExtension } from "../core/contracts";
+import {
+  supportsSchemaExtension,
+  supportsVerification,
+} from "../core/contracts";
 import type {
   ArtifactSpec,
   ProjectModel,
@@ -21,6 +29,11 @@ import {
   writeArtifact,
   type ResolvedDependency,
 } from "../core/project";
+import {
+  presentVerification,
+  runVerificationStage,
+  verificationStageName,
+} from "../core/verification";
 import { runMethodSlicer } from "../agents/methodSlicer";
 import { runDependencyResolver } from "../agents/dependencyResolver";
 import { runContextBuilder } from "../agents/contextBuilder";
@@ -47,13 +60,20 @@ const sessionsByPanel = new WeakMap<vscode.WebviewPanel, ChatSession>();
 
 const generationMetaByPanel = new WeakMap<
   vscode.WebviewPanel,
-  { className: string; methodName: string; model: string; subModel: string | null }
+  {
+    className: string;
+    methodName: string;
+    model: string;
+    subModel: string | null;
+  }
 >();
 
 type TestContext = {
   testCode: string;
   assembledContext: string;
   savedPath: string;
+  /** Modelo de la corrida, para volver a verificar el artefacto (OP-13). */
+  project: ProjectModel;
   /** Especificación con la que se escribió, para volver a normalizar (OP-11). */
   spec: ArtifactSpec;
   /** Perfil de la corrida, para que el corrector componga el mismo prompt. */
@@ -68,9 +88,12 @@ const tokenTotalsByPanel = new WeakMap<
 
 function addTokenUsage(
   panel: vscode.WebviewPanel,
-  usage: { inputTokens: number; outputTokens: number }
+  usage: { inputTokens: number; outputTokens: number },
 ) {
-  const totals = tokenTotalsByPanel.get(panel) ?? { inputTokens: 0, outputTokens: 0 };
+  const totals = tokenTotalsByPanel.get(panel) ?? {
+    inputTokens: 0,
+    outputTokens: 0,
+  };
   totals.inputTokens += usage.inputTokens;
   totals.outputTokens += usage.outputTokens;
   tokenTotalsByPanel.set(panel, totals);
@@ -78,12 +101,17 @@ function addTokenUsage(
 
 // ── Model handlers ─────────────────────────────────────────────────────────────
 
-type ModelProvider = (messages: ChatMessage[], subModel?: string) => Promise<LLMResult>;
+type ModelProvider = (
+  messages: ChatMessage[],
+  subModel?: string,
+) => Promise<LLMResult>;
 
 const modelProviders: Record<string, ModelProvider> = {
-  chatgpt: (messages, subModel) => generateWithChatGPT(messages, subModel || "gpt-4o-mini"),
+  chatgpt: (messages, subModel) =>
+    generateWithChatGPT(messages, subModel || "gpt-4o-mini"),
   llamaLocal: (messages) => generateWithOllama(messages),
-  claude: (messages, subModel) => generateWithClaude(messages, subModel || "claude-opus-4-8"),
+  claude: (messages, subModel) =>
+    generateWithClaude(messages, subModel || "claude-haiku-4-5"),
 };
 
 /**
@@ -95,9 +123,12 @@ async function askOnce(
   provider: ModelProvider,
   prompt: string,
   panel: vscode.WebviewPanel,
-  subModel?: string
+  subModel?: string,
 ): Promise<string> {
-  const { text, usage } = await provider([{ role: "user", content: prompt }], subModel);
+  const { text, usage } = await provider(
+    [{ role: "user", content: prompt }],
+    subModel,
+  );
   addTokenUsage(panel, usage);
   return text;
 }
@@ -107,7 +138,7 @@ async function askInChat(
   provider: ModelProvider,
   message: string,
   panel: vscode.WebviewPanel,
-  subModel?: string
+  subModel?: string,
 ): Promise<string> {
   let session = sessionsByPanel.get(panel);
   if (!session) {
@@ -123,11 +154,44 @@ async function askInChat(
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+/**
+ * Verifica el artefacto que ya está en disco (OP-13) y muestra el resultado
+ * debajo de la prueba.
+ *
+ * Corre después de mostrar la prueba y no antes: la verificación puede tardar
+ * segundos o minutos, y la prueba ya está escrita y se puede leer mientras
+ * tanto. Si el adaptador no ofrece verificación, la etapa se informa como no
+ * aplicable sin lanzar nada.
+ */
+async function verifyAndShow(
+  panel: vscode.WebviewPanel,
+  ecosystem: ActiveEcosystem,
+  project: ProjectModel,
+  spec: ArtifactSpec,
+) {
+  const { adapter } = ecosystem;
+  const kind = adapter.capabilities.verification;
+
+  if (supportsVerification(adapter)) {
+    panel.webview.postMessage({
+      command: "verificationRunning",
+      stageName: verificationStageName(kind),
+    });
+  }
+
+  const outcome = await runVerificationStage(adapter, project, spec);
+  saveAgentOutput(project.rootPath, "verification", outcome);
+  panel.webview.postMessage({
+    command: "showVerification",
+    verification: presentVerification(kind, outcome),
+  });
+}
+
 function notifyAgent(
   panel: vscode.WebviewPanel,
   agent: string,
   status: "running" | "done" | "error",
-  detail?: string
+  detail?: string,
 ) {
   panel.webview.postMessage({ command: "agentStatus", agent, status, detail });
 }
@@ -153,7 +217,7 @@ function buildFullContext(
   className: string,
   methodName: string,
   targetCode: string,
-  dependencyFiles: readonly ResolvedDependency[]
+  dependencyFiles: readonly ResolvedDependency[],
 ): string {
   const header = `// ── TARGET: ${className}.${methodName} ──────────────────────────────────────`;
   const parts = [header, targetCode];
@@ -162,7 +226,7 @@ function buildFullContext(
     if (!dep.found || !dep.content) continue;
     parts.push(
       `// ── DEPENDENCY: ${dependencyLabel(dep)} ──────────────────────────────────────`,
-      dep.content
+      dep.content,
     );
   }
 
@@ -181,9 +245,12 @@ async function readTargetCode(
   ecosystem: ActiveEcosystem,
   project: ProjectModel,
   editor: EditorSelection,
-  location: SymbolCandidate
+  location: SymbolCandidate,
 ): Promise<string> {
-  const declaredIn = path.join(project.rootPath, ...location.filePath.split("/"));
+  const declaredIn = path.join(
+    project.rootPath,
+    ...location.filePath.split("/"),
+  );
   if (samePath(declaredIn, editor.path)) {
     return editor.code;
   }
@@ -201,7 +268,7 @@ async function handleGenerate(
   editor: EditorSelection,
   reduceContext: boolean,
   panel: vscode.WebviewPanel,
-  ecosystem: ActiveEcosystem
+  ecosystem: ActiveEcosystem,
 ) {
   generationMetaByPanel.set(panel, { className, methodName, model, subModel });
 
@@ -227,7 +294,8 @@ async function handleGenerate(
 
     const provider = modelProviders[model];
     if (!provider) throw new Error(`Modelo no válido: ${model}`);
-    const ask = (prompt: string) => askOnce(provider, prompt, panel, subModel ?? undefined);
+    const ask = (prompt: string) =>
+      askOnce(provider, prompt, panel, subModel ?? undefined);
 
     // ── OP-05: localización de la unidad bajo prueba ─────────────────────────
     const target: UnitTarget = { className, methodName };
@@ -255,7 +323,12 @@ async function handleGenerate(
     }
 
     // ── OP-06: código de la unidad ───────────────────────────────────────────
-    const targetCode = await readTargetCode(ecosystem, project, editor, targetLocation);
+    const targetCode = await readTargetCode(
+      ecosystem,
+      project,
+      editor,
+      targetLocation,
+    );
 
     // ── OP-08: perfil con el que se componen las plantillas neutras ──────────
     // Se pide una sola vez por corrida: depende del proyecto descubierto y ese
@@ -276,8 +349,14 @@ async function handleGenerate(
       const slicerAgent = "Method Slicer";
       notifyAgent(panel, slicerAgent, "running");
       const slicerResult = await runMethodSlicer(
-        { profile, code: targetCode, className, methodName, workspaceRoot: outputRoot },
-        ask
+        {
+          profile,
+          code: targetCode,
+          className,
+          methodName,
+          workspaceRoot: outputRoot,
+        },
+        ask,
       );
       saveAgentOutput(outputRoot, "method-slicer", slicerResult);
 
@@ -296,8 +375,15 @@ async function handleGenerate(
     const depAgent = "Dependency Resolver";
     notifyAgent(panel, depAgent, "running");
     const depResult = await runDependencyResolver(
-      { profile, codeSlice, projectTree, className, methodName, workspaceRoot: outputRoot },
-      ask
+      {
+        profile,
+        codeSlice,
+        projectTree,
+        className,
+        methodName,
+        workspaceRoot: outputRoot,
+      },
+      ask,
     );
     saveAgentOutput(outputRoot, "dependency-resolver", depResult);
 
@@ -311,12 +397,19 @@ async function handleGenerate(
     const depReferences: string[] =
       depResult.status === "MISSING_DEPENDENCIES" ? depResult.files : [];
 
-    const dependencies = await resolveDependencies(adapter, project, depReferences);
+    const dependencies = await resolveDependencies(
+      adapter,
+      project,
+      depReferences,
+    );
 
     if (dependencies.files.length > 0) {
       panel.webview.postMessage({
         command: "dependencyFiles",
-        files: dependencies.files.map((f) => ({ path: dependencyLabel(f), found: f.found })),
+        files: dependencies.files.map((f) => ({
+          path: dependencyLabel(f),
+          found: f.found,
+        })),
       });
     }
 
@@ -335,7 +428,7 @@ async function handleGenerate(
           methodName,
           workspaceRoot: outputRoot,
         },
-        ask
+        ask,
       );
       saveAgentOutput(outputRoot, "context-builder", ctxResult);
 
@@ -348,7 +441,9 @@ async function handleGenerate(
       if (ctxResult.dependencySlices.length > 0) {
         panel.webview.postMessage({
           command: "contextBuilderSlices",
-          slices: ctxResult.dependencySlices.map((s) => ({ filePath: s.filePath })),
+          slices: ctxResult.dependencySlices.map((s) => ({
+            filePath: s.filePath,
+          })),
         });
       }
 
@@ -358,7 +453,7 @@ async function handleGenerate(
         className,
         methodName,
         targetCode,
-        dependencies.files
+        dependencies.files,
       );
     }
 
@@ -366,8 +461,15 @@ async function handleGenerate(
     const ctxValAgent = "Context Validator";
     notifyAgent(panel, ctxValAgent, "running");
     const ctxValResult = await runContextValidator(
-      { profile, assembledContext: preValidationContext, className, methodName, workspaceRoot: outputRoot, fullContext: !reduceContext },
-      ask
+      {
+        profile,
+        assembledContext: preValidationContext,
+        className,
+        methodName,
+        workspaceRoot: outputRoot,
+        fullContext: !reduceContext,
+      },
+      ask,
     );
     saveAgentOutput(outputRoot, "validator-context", ctxValResult);
 
@@ -376,8 +478,12 @@ async function handleGenerate(
       throw new Error(`Context Validator failed: ${ctxValResult.message}`);
     }
     notifyAgent(
-      panel, ctxValAgent, "done",
-      ctxValResult.status === "FIXED" ? `Corregidos ${ctxValResult.issues.length} problema(s)` : undefined
+      panel,
+      ctxValAgent,
+      "done",
+      ctxValResult.status === "FIXED"
+        ? `Corregidos ${ctxValResult.issues.length} problema(s)`
+        : undefined,
     );
 
     const assembledContext = ctxValResult.output;
@@ -394,7 +500,7 @@ async function handleGenerate(
         methodName,
         workspaceRoot: outputRoot,
       },
-      ask
+      ask,
     );
     saveAgentOutput(outputRoot, "code-analyzer", codeAnalyzerResult);
 
@@ -405,17 +511,27 @@ async function handleGenerate(
         : undefined;
 
     notifyAgent(
-      panel, codeAnalyzerAgent,
+      panel,
+      codeAnalyzerAgent,
       codeAnalyzerResult.status === "READY" ? "done" : "error",
-      codeAnalyzerResult.status === "ERROR" ? codeAnalyzerResult.message : undefined
+      codeAnalyzerResult.status === "ERROR"
+        ? codeAnalyzerResult.message
+        : undefined,
     );
 
     // ── Step 3: Test Generator ────────────────────────────────────────────────
     const testAgent = "Test Generator";
     notifyAgent(panel, testAgent, "running");
     const testResult = await runTestGenerator(
-      { profile, assembledContext, codeAnalysis, className, methodName, workspaceRoot: outputRoot },
-      ask
+      {
+        profile,
+        assembledContext,
+        codeAnalysis,
+        className,
+        methodName,
+        workspaceRoot: outputRoot,
+      },
+      ask,
     );
     saveAgentOutput(outputRoot, "test-generator", testResult);
 
@@ -426,15 +542,25 @@ async function handleGenerate(
     notifyAgent(panel, testAgent, "done");
 
     // ── OP-11: normalización y escritura del artefacto ───────────────────────
-    let finalTestCode = adapter.normalizeGeneratedCode(testResult.testCode, spec);
+    let finalTestCode = adapter.normalizeGeneratedCode(
+      testResult.testCode,
+      spec,
+    );
     const savedPath = await writeArtifact(project, spec, finalTestCode);
 
     // ── Step 3.5: Test Validator ──────────────────────────────────────────────
     const testValAgent = "Test Validator";
     notifyAgent(panel, testValAgent, "running");
     const testValResult = await runTestValidator(
-      { profile, testCode: finalTestCode, assembledContext, className, methodName, workspaceRoot: outputRoot },
-      ask
+      {
+        profile,
+        testCode: finalTestCode,
+        assembledContext,
+        className,
+        methodName,
+        workspaceRoot: outputRoot,
+      },
+      ask,
     );
     saveAgentOutput(outputRoot, "validator-test", testValResult);
 
@@ -442,9 +568,17 @@ async function handleGenerate(
       // Soft failure: surface the error but keep the original generated code
       notifyAgent(panel, testValAgent, "error", testValResult.message);
     } else if (testValResult.status === "FIXED") {
-      finalTestCode = adapter.normalizeGeneratedCode(testValResult.output, spec);
+      finalTestCode = adapter.normalizeGeneratedCode(
+        testValResult.output,
+        spec,
+      );
       await writeArtifact(project, spec, finalTestCode);
-      notifyAgent(panel, testValAgent, "done", `Corregidos ${testValResult.issues.length} problema(s)`);
+      notifyAgent(
+        panel,
+        testValAgent,
+        "done",
+        `Corregidos ${testValResult.issues.length} problema(s)`,
+      );
     } else {
       notifyAgent(panel, testValAgent, "done");
     }
@@ -454,15 +588,28 @@ async function handleGenerate(
       testCode: finalTestCode,
       assembledContext,
       savedPath,
+      project,
       spec,
       profile,
     });
 
     const elapsedMs = Date.now() - generationStart;
-    const tokens = tokenTotalsByPanel.get(panel) ?? { inputTokens: 0, outputTokens: 0 };
+    const tokens = tokenTotalsByPanel.get(panel) ?? {
+      inputTokens: 0,
+      outputTokens: 0,
+    };
     const totalTokens = tokens.inputTokens + tokens.outputTokens;
-    panel.webview.postMessage({ command: "showResult", result: finalTestCode, elapsedMs, totalTokens });
+    panel.webview.postMessage({
+      command: "showResult",
+      result: finalTestCode,
+      elapsedMs,
+      totalTokens,
+    });
 
+    // ── OP-13: verificación del artefacto escrito ────────────────────────────
+    // Fuera del tiempo de generación a propósito: mide al modelo, no al
+    // compilador.
+    await verifyAndShow(panel, ecosystem, project, spec);
   } catch (err: any) {
     panel.webview.postMessage({ command: "agentError", message: err.message });
     vscode.window.showErrorMessage("Error al generar: " + err.message);
@@ -474,7 +621,7 @@ async function handleGenerate(
 export async function createWebviewPanel(
   context: vscode.ExtensionContext,
   editor: EditorSelection,
-  ecosystem: ActiveEcosystem
+  ecosystem: ActiveEcosystem,
 ) {
   const panel = vscode.window.createWebviewPanel(
     "unityTestIAView",
@@ -488,7 +635,7 @@ export async function createWebviewPanel(
         vscode.Uri.file(path.join(context.extensionPath, "assets")),
         vscode.Uri.file(path.join(context.extensionPath, "dist")),
       ],
-    }
+    },
   );
 
   const models: { id: string; name: string; type?: string }[] = [];
@@ -510,24 +657,30 @@ export async function createWebviewPanel(
 
   const uiPath = path.join(context.extensionPath, "ui", "index.html");
   const cssUri = panel.webview.asWebviewUri(
-    vscode.Uri.file(path.join(context.extensionPath, "dist", "bundle.css"))
+    vscode.Uri.file(path.join(context.extensionPath, "dist", "bundle.css")),
   );
   const logoUri = panel.webview.asWebviewUri(
-    vscode.Uri.file(path.join(context.extensionPath, "assets", "logo.png"))
+    vscode.Uri.file(path.join(context.extensionPath, "assets", "logo.png")),
   );
   const scriptUri = panel.webview.asWebviewUri(
-    vscode.Uri.file(path.join(context.extensionPath, "dist", "bundle.js"))
+    vscode.Uri.file(path.join(context.extensionPath, "dist", "bundle.js")),
   );
 
   let html = fs.readFileSync(uiPath, "utf8");
-  html = html.replace("${code}", editor.code.replace(/</g, "&lt;").replace(/>/g, "&gt;"));
+  html = html.replace(
+    "${code}",
+    editor.code.replace(/</g, "&lt;").replace(/>/g, "&gt;"),
+  );
   html = html.replace("${logoUri}", logoUri.toString());
   html = html.replace("@@styleUri", cssUri.toString());
   html = html.replace("@@scriptUri", scriptUri.toString());
   panel.webview.html = html;
 
   panel.webview.postMessage({ command: "setModels", models });
-  panel.webview.postMessage({ command: "setEcosystem", ecosystem: ecosystemInfo });
+  panel.webview.postMessage({
+    command: "setEcosystem",
+    ecosystem: ecosystemInfo,
+  });
 
   panel.webview.onDidReceiveMessage(async (message) => {
     switch (message.command) {
@@ -536,21 +689,33 @@ export async function createWebviewPanel(
 
         // OP-05 sobre el proyecto entero, en lugar de dos expresiones regulares
         // sobre el archivo abierto. El motivo del fallo lo redacta el adaptador.
-        const project = await ecosystem.adapter.buildProjectModel(ecosystem.rootPath);
-        const location = await ecosystem.adapter.locateSymbol(project, { className, methodName });
+        const project = await ecosystem.adapter.buildProjectModel(
+          ecosystem.rootPath,
+        );
+        const location = await ecosystem.adapter.locateSymbol(project, {
+          className,
+          methodName,
+        });
 
         if (!location.found) {
           vscode.window.showErrorMessage(location.reason);
           panel.webview.postMessage({ command: "resetInputs" });
           return;
         }
-        panel.webview.postMessage({ command: "goToStep2", className, methodName });
+        panel.webview.postMessage({
+          command: "goToStep2",
+          className,
+          methodName,
+        });
         break;
       }
 
       case "webviewReady": {
         panel.webview.postMessage({ command: "setModels", models });
-        panel.webview.postMessage({ command: "setEcosystem", ecosystem: ecosystemInfo });
+        panel.webview.postMessage({
+          command: "setEcosystem",
+          ecosystem: ecosystemInfo,
+        });
         break;
       }
 
@@ -560,14 +725,40 @@ export async function createWebviewPanel(
         // sería recorrer el proyecto dos veces.
         const { className, methodName, model, subModel } = message;
         const reduceContext = message.reduceContext !== false;
-        await handleGenerate(className, methodName, model, subModel, editor, reduceContext, panel, ecosystem);
+        await handleGenerate(
+          className,
+          methodName,
+          model,
+          subModel,
+          editor,
+          reduceContext,
+          panel,
+          ecosystem,
+        );
         break;
       }
 
       case "generateTest": {
         const { className, methodName } = await collectClassAndMethod(panel);
         const reduceContext = message.reduceContext !== false;
-        await handleGenerate(className, methodName, message.model, message.subModel, editor, reduceContext, panel, ecosystem);
+        await handleGenerate(
+          className,
+          methodName,
+          message.model,
+          message.subModel,
+          editor,
+          reduceContext,
+          panel,
+          ecosystem,
+        );
+        break;
+      }
+
+      case "verifyAgain": {
+        const testCtx = testContextByPanel.get(panel);
+        if (testCtx) {
+          await verifyAndShow(panel, ecosystem, testCtx.project, testCtx.spec);
+        }
         break;
       }
 
@@ -576,7 +767,12 @@ export async function createWebviewPanel(
         if (!text) return;
 
         const meta = generationMetaByPanel.get(panel);
-        if (!meta) { vscode.window.showErrorMessage("No hay configuración de modelo cargada."); return; }
+        if (!meta) {
+          vscode.window.showErrorMessage(
+            "No hay configuración de modelo cargada.",
+          );
+          return;
+        }
 
         const provider = modelProviders[meta.model];
         const subModel = meta.subModel ?? undefined;
@@ -595,7 +791,7 @@ export async function createWebviewPanel(
               methodName: meta.methodName,
               workspaceRoot: ecosystem.rootPath,
             },
-            (prompt) => askOnce(provider, prompt, panel, subModel)
+            (prompt) => askOnce(provider, prompt, panel, subModel),
           );
           saveAgentOutput(ecosystem.rootPath, "chat-fixer", fixResult);
 
@@ -605,18 +801,35 @@ export async function createWebviewPanel(
             // ecosistema no reconocería la prueba.
             const corrected = ecosystem.adapter.normalizeGeneratedCode(
               fixResult.correctedCode,
-              testCtx.spec
+              testCtx.spec,
             );
             testContextByPanel.set(panel, { ...testCtx, testCode: corrected });
             fs.writeFileSync(testCtx.savedPath, corrected, "utf8");
             const summary = fixResult.summary ?? "Correcciones aplicadas";
             notifyAgent(panel, "Chat Fixer", "done", summary);
-            panel.webview.postMessage({ command: "chatResponse", text: `✓ ${summary}` });
+            panel.webview.postMessage({
+              command: "chatResponse",
+              text: `✓ ${summary}`,
+            });
             // updateResult: updates the code panel without clearing the agent pipeline
-            panel.webview.postMessage({ command: "updateResult", result: corrected });
+            panel.webview.postMessage({
+              command: "updateResult",
+              result: corrected,
+            });
+            // La verificación anterior era de la versión que se acaba de
+            // reemplazar: se repite para que lo mostrado corresponda al disco.
+            await verifyAndShow(
+              panel,
+              ecosystem,
+              testCtx.project,
+              testCtx.spec,
+            );
           } else if (fixResult.status === "INFO") {
             notifyAgent(panel, "Chat Fixer", "done");
-            panel.webview.postMessage({ command: "chatResponse", text: fixResult.answer });
+            panel.webview.postMessage({
+              command: "chatResponse",
+              text: fixResult.answer,
+            });
           } else {
             // ERROR from ChatFixer — fall back to plain chat
             notifyAgent(panel, "Chat Fixer", "error", fixResult.message);

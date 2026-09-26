@@ -299,3 +299,40 @@
 .agent-dep-files__item--missing {
   color: #f07178;
 }
+
+/* ========================== Verificación del artefacto ========================== */
+.verification {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: #1e1e1e;
+  border-left: 3px solid #555;
+}
+
+.verification--running { border-left-color: #c792ea; background: #2a1f2e; }
+.verification--passed { border-left-color: #4caf50; background: #1a2b1a; }
+.verification--failed { border-left-color: #f07178; background: #2a1a1a; }
+.verification--notRun { border-left-color: #ffcb6b; background: #2b261a; }
+
+.verification__header { font-weight: 600; color: #cdd6f4; }
+.verification__remediation { margin-top: 4px; color: #ffcb6b; }
+
+.verification__diagnostics {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid #333;
+}
+
+.verification__diagnostic {
+  padding: 1px 0;
+  font-family: monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.verification__diagnostic--error { color: #f07178; }
+.verification__diagnostic--warning { color: #ffcb6b; }
+
+.verification__retry { margin-top: 8px; font-size: 11px; }

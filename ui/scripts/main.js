@@ -14,6 +14,9 @@ import {
   clearAgentPipeline,
   showDependencyFilesList,
   showContextBuilderSlices,
+  showVerificationRunning,
+  showVerification,
+  hideVerification,
 } from "./managers/uiManager.js";
 import { initChat, appendChatMessage } from "./managers/chatManager.js";
 import "../styles/main.css";
@@ -244,6 +247,7 @@ window.addEventListener("message", (event) => {
 
     case "clearPipeline":
       clearAgentPipeline();
+      hideVerification();
       if (genTimeBadge) genTimeBadge.style.display = "none";
       if (genTokenBadge) genTokenBadge.style.display = "none";
       break;
@@ -295,6 +299,16 @@ window.addEventListener("message", (event) => {
       resultContainer.scrollIntoView({ behavior: "smooth", block: "nearest" });
       break;
     }
+
+    case "verificationRunning":
+      showVerificationRunning(message.stageName);
+      break;
+
+    case "showVerification":
+      showVerification(message.verification, () =>
+        vscode.postMessage({ command: "verifyAgain" })
+      );
+      break;
 
     case "showDependencyResult":
       hideLoadingUI();

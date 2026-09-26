@@ -154,6 +154,88 @@ export function showContextBuilderSlices(slices) {
   ctxStep.after(list);
 }
 
+// === Verificación del artefacto ===
+
+/**
+ * Muestra que la verificación está en curso. Deshabilita el reintento: una
+ * segunda verificación a la vez chocaría con la primera por el mismo proyecto.
+ * @param {string} stageName
+ */
+export function showVerificationRunning(stageName) {
+  const panel = document.getElementById("verificationPanel");
+  if (!panel) return;
+
+  panel.replaceChildren();
+  panel.className = "verification verification--running";
+  panel.style.display = "block";
+
+  const header = document.createElement("div");
+  header.className = "verification__header";
+  header.textContent = `${stageName}: en curso…`;
+  panel.appendChild(header);
+}
+
+/**
+ * Muestra el resultado ya compuesto por el núcleo. Todo el texto entra con
+ * textContent: los mensajes del compilador traen «<» y «>» de los genéricos.
+ * @param {{ stageName: string, status: string, summary: string,
+ *           remediation?: string,
+ *           diagnostics: { severity: string, location: string, code?: string, message: string }[] }} verification
+ * @param {() => void} onRetry
+ */
+export function showVerification(verification, onRetry) {
+  const panel = document.getElementById("verificationPanel");
+  if (!panel || !verification) return;
+
+  panel.replaceChildren();
+  panel.className = `verification verification--${verification.status}`;
+  panel.style.display = "block";
+
+  const header = document.createElement("div");
+  header.className = "verification__header";
+  header.textContent = `${verification.stageName}: ${verification.summary}`;
+  panel.appendChild(header);
+
+  if (verification.remediation) {
+    const remediation = document.createElement("div");
+    remediation.className = "verification__remediation";
+    remediation.textContent = `→ ${verification.remediation}`;
+    panel.appendChild(remediation);
+  }
+
+  if (verification.diagnostics.length) {
+    const list = document.createElement("div");
+    list.className = "verification__diagnostics";
+    for (const d of verification.diagnostics) {
+      const row = document.createElement("div");
+      row.className = `verification__diagnostic verification__diagnostic--${d.severity}`;
+      row.textContent = `${d.location}  ${d.code ? `${d.code}: ` : ""}${d.message}`;
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+  }
+
+  // Sin reintento cuando la etapa no aplica: no hay nada que volver a correr.
+  if (verification.status !== "notApplicable") {
+    const retry = document.createElement("button");
+    retry.className = "verification__retry";
+    retry.textContent = `Volver a intentar: ${verification.stageName.toLowerCase()}`;
+    retry.addEventListener("click", () => {
+      retry.disabled = true;
+      onRetry();
+    });
+    panel.appendChild(retry);
+  }
+}
+
+/** Oculta el resultado de una verificación anterior. */
+export function hideVerification() {
+  const panel = document.getElementById("verificationPanel");
+  if (!panel) return;
+  panel.replaceChildren();
+  panel.style.display = "none";
+}
+
 export function enterGenerationMode() {
   const stepper = document.getElementById("stepper");
   const jsonContainer = document.getElementById("configLoader");

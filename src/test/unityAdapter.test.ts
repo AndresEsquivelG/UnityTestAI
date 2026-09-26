@@ -279,12 +279,11 @@ describe("adaptador de Unity", () => {
   });
 
   describe("OP-03 · capacidades declaradas", () => {
-    it("declara la extensión del esquema y ninguna otra", () => {
-      // Las cuatro en falso son ciertas hoy: el pipeline no compila, no ejecuta
-      // pruebas, no mide cobertura y no tiene artefactos temporales que
-      // preparar ni limpiar.
+    it("declara la extensión del esquema y la compilación, y ninguna otra", () => {
+      // Las tres en falso son ciertas hoy: el pipeline no ejecuta pruebas, no
+      // mide cobertura y no tiene artefactos temporales que preparar ni limpiar.
       assert.deepEqual(adapter.capabilities, {
-        verification: "none",
+        verification: "compile",
         runTests: false,
         coverage: false,
         analysisSchemaExtension: true,
@@ -292,10 +291,11 @@ describe("adaptador de Unity", () => {
       });
     });
 
-    it("implementa OP-09 tal como la declara", () => {
+    it("implementa OP-09 y OP-13 tal como las declara", () => {
       // El registro rechazaría al adaptador si declarara sin implementar, pero
       // conviene que el fallo se lea aquí y no en un mensaje de alta.
       assert.equal(typeof adapter.extendAnalysisSchema, "function");
+      assert.equal(typeof adapter.verifyArtifact, "function");
     });
   });
 });

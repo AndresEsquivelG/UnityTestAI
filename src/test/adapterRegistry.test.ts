@@ -95,7 +95,7 @@ describe("registro de adaptadores", () => {
         capabilities: { verification: "compile" },
         optional: {
           verifyArtifact: async () => ({
-            succeeded: true,
+            status: "passed",
             diagnostics: [],
             exitCode: 0,
             rawOutput: "",

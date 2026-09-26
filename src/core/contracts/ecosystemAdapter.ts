@@ -131,8 +131,13 @@ export interface EcosystemAdapter {
    * Es compilación cuando el ecosistema la contempla y comprobación de
    * importabilidad cuando no. El núcleo la invoca igual en ambos casos: la
    * diferencia se declara, no se programa.
+   *
+   * Recibe la especificación del artefacto porque la verificación puede ser de
+   * ese archivo y no del proyecto entero: comprobar que un módulo se importa
+   * exige saber cuál. Aunque se compile todo el proyecto, sirve para separar
+   * los avisos del artefacto de los del resto del código.
    */
-  verifyArtifact?(project: ProjectModel): Promise<VerificationResult>;
+  verifyArtifact?(project: ProjectModel, spec: ArtifactSpec): Promise<VerificationResult>;
 
   /**
    * OP-14 — Ejecución de las pruebas generadas. OPCIONAL.
