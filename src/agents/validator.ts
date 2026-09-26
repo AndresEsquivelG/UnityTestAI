@@ -8,9 +8,17 @@ import { readCodeField } from "../utils/codeField";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
 
+/**
+ * `UNFIXED`: el validador encontró problemas pero no trajo corrección. Es una
+ * respuesta legítima y no un formato roto: al validador de contexto le puede
+ * faltar justo lo que habría que agregar —la declaración de un tipo que nadie
+ * pidió—, y no tiene de dónde sacarlo sin inventarlo. `output` es la entrada
+ * sin tocar.
+ */
 export const validatorOutputSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("VALID"),   output: z.string() }),
   z.object({ status: z.literal("FIXED"),   output: z.string(), issues: z.array(z.string()) }),
+  z.object({ status: z.literal("UNFIXED"), output: z.string(), issues: z.array(z.string()) }),
   z.object({ status: z.literal("ERROR"),   message: z.string() }),
 ]);
 
@@ -44,7 +52,7 @@ function parseValidatorResponse(
       z.object({
         status: z.literal("INVALID"),
         issues: z.array(z.string()),
-        [fixedKey]: z.string(),
+        [fixedKey]: z.string().optional(),
       }),
     ]);
 
@@ -55,9 +63,12 @@ function parseValidatorResponse(
     }
 
     const issues: string[] = (parsed as any).issues;
-    const fixed = readCodeField(
-      stripSpuriousLeadingBrace((parsed as Record<string, any>)[fixedKey] as string)
-    );
+    const correction = (parsed as Record<string, any>)[fixedKey] as string | undefined;
+    if (correction === undefined || correction.trim() === "") {
+      return { status: "UNFIXED", output: originalOutput, issues };
+    }
+
+    const fixed = readCodeField(stripSpuriousLeadingBrace(correction));
     if (!fixed.ok) {
       // Los problemas que encontró siguen valiendo aunque su corrección no sirva.
       return {
