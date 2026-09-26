@@ -61,6 +61,14 @@ export interface VerificationPresentation {
   readonly summary: string;
   readonly remediation?: string;
   readonly diagnostics: readonly PresentedDiagnostic[];
+  /** Qué hizo la corrección automática con este resultado, si hizo algo. */
+  readonly note?: string;
+  /**
+   * Hay una corrección automática en curso. No se ofrece reintentar: una
+   * segunda verificación a la vez chocaría con la del ciclo por el mismo
+   * proyecto.
+   */
+  readonly inProgress?: boolean;
 }
 
 /**
@@ -136,6 +144,6 @@ function presentDiagnostic(diagnostic: Diagnostic): PresentedDiagnostic {
   };
 }
 
-function plural(count: number, singular: string, pluralForm: string): string {
+export function plural(count: number, singular: string, pluralForm: string): string {
   return `${count} ${count === 1 ? singular : pluralForm}`;
 }

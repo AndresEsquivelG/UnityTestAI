@@ -39,6 +39,17 @@ export async function writeArtifact(
 }
 
 /**
+ * Lee el artefacto tal como está en disco.
+ *
+ * Lo que se verificó es el disco, no la última versión que el núcleo escribió:
+ * la persona usuaria puede haber editado la prueba entre una verificación y la
+ * siguiente, y los diagnósticos hablan de ese texto.
+ */
+export async function readArtifact(project: ProjectModel, spec: ArtifactSpec): Promise<string> {
+  return fsp.readFile(artifactAbsolutePath(project, spec), "utf8");
+}
+
+/**
  * Presenta los incumplimientos de OP-12 como un solo texto.
  *
  * Cada uno va con su instrucción de subsanación, que es obligatoria en el

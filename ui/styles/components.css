@@ -254,8 +254,9 @@
   background: #2a1a1a;
 }
 
-.agent-step__name { font-weight: 600; color: #cdd6f4; }
-.agent-step__label { color: #999; font-size: 11px; }
+.agent-step__name { font-weight: 600; color: #cdd6f4; flex-shrink: 0; }
+/* El detalle puede ser un resumen largo del modelo: parte en líneas. */
+.agent-step__label { color: #999; font-size: 11px; min-width: 0; overflow-wrap: anywhere; }
 
 /* Animated dots for running state */
 .agent-step__dots {
@@ -316,6 +317,7 @@
 .verification--notRun { border-left-color: #ffcb6b; background: #2b261a; }
 
 .verification__header { font-weight: 600; color: #cdd6f4; }
+.verification__note { margin-top: 4px; color: #c792ea; }
 .verification__remediation { margin-top: 4px; color: #ffcb6b; }
 
 .verification__diagnostics {

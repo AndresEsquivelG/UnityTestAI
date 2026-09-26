@@ -11,6 +11,7 @@ export {
   artifactAbsolutePath,
   artifactRelativePath,
   describeViolations,
+  readArtifact,
   writeArtifact,
 } from "./artifact";
 

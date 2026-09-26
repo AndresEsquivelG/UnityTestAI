@@ -31,6 +31,11 @@ export interface ChatFixerInput {
   className: string;
   methodName: string;
   workspaceRoot: string;
+  /**
+   * Carpeta de los volcados dentro de `AgentOutputs`. La corrección automática
+   * usa una por ciclo para que un ciclo no pise el prompt del anterior.
+   */
+  dumpDir?: string;
 }
 
 // ── Main function ──────────────────────────────────────────────────────────────
@@ -53,7 +58,7 @@ export async function runChatFixer(
   input: ChatFixerInput,
   llmHandler: (prompt: string) => Promise<string>
 ): Promise<ChatFixerOutput> {
-  const dumpDir = path.join(input.workspaceRoot, "AgentOutputs", "chat-fixer");
+  const dumpDir = path.join(input.workspaceRoot, "AgentOutputs", input.dumpDir ?? "chat-fixer");
   fs.mkdirSync(dumpDir, { recursive: true });
 
   const prompt = buildChatFixerPrompt(
