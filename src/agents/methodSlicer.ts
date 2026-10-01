@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { buildMethodSlicerPrompt } from "../prompts/promptBuilder";
+import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -22,10 +23,31 @@ export type MethodSlicerOutput = z.infer<typeof methodSlicerOutputSchema>;
 // ── Input ──────────────────────────────────────────────────────────────────────
 
 export interface MethodSlicerInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   code: string;
   className: string;
   methodName: string;
   workspaceRoot: string;
+}
+
+// ── Response reading ───────────────────────────────────────────────────────────
+
+/**
+ * El estado de éxito no dice nada que no diga ya `codeSlice`, y los modelos
+ * lo cambian: Haiku contestó `"SUCCESS"` con un recorte correcto, y la corrida
+ * se cortaba por la etiqueta. Se decide por el contenido: si trae el recorte y
+ * no se declara error, está listo. El recorte se sigue validando entero.
+ */
+function withReadyStatus(json: unknown): unknown {
+  if (typeof json !== "object" || json === null || Array.isArray(json)) {
+    return json;
+  }
+  const response = json as Record<string, unknown>;
+  if (response.status !== "ERROR" && Array.isArray(response.codeSlice)) {
+    return { ...response, status: "READY" };
+  }
+  return json;
 }
 
 // ── Main function ──────────────────────────────────────────────────────────────
@@ -46,6 +68,7 @@ export async function runMethodSlicer(
   llmHandler: (prompt: string) => Promise<string>
 ): Promise<MethodSlicerOutput> {
   const prompt = buildMethodSlicerPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.code
@@ -68,7 +91,7 @@ export async function runMethodSlicer(
       throw new Error("No JSON object found in LLM response");
     }
     const json = JSON.parse(JsonSanitizer.sanitize(jsonMatch[0]));
-    parsed = methodSlicerOutputSchema.parse(json);
+    parsed = methodSlicerOutputSchema.parse(withReadyStatus(json));
   } catch (err: any) {
     parsed = {
       status: "ERROR",

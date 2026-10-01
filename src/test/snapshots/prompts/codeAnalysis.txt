@@ -1,0 +1,40 @@
+Method: Move(float distance, bool sprint) → bool
+
+Decision Table:
+  [TRUE] distance <= 0f → devuelve false
+  [FALSE] distance <= 0f → se desplaza
+
+Loops:
+  foreach(waypoints)
+
+Side Effects: escribe speed; llama a transform.Translate
+
+Dependencies:
+  class inventory: [HasStamina]
+
+Private Members (require Reflection):
+  [field] float speed
+  [nestedType] enum State — values: Wait, Init
+  [unityMessage] void FixedUpdate
+
+Fields initialized in Start/Awake (must init via Reflection in SetUp):
+  float speed [Awake] — usar 5
+  Queue<Vector3> waypoints [Start]
+
+Required project namespace usings (add to test file):
+  using Game.Actors;
+  using Game.Items;
+
+UNTESTABLE BRANCHES — OMIT these entirely, do NOT write Assert.Pass() placeholders:
+  SKIP: Input.GetKeyDown(jumpKey) — Input always false in PlayMode
+
+━━ PRE-FLIGHT CHECKLIST — use as ground truth, do NOT re-derive ━━
+
+Type Instantiations:
+  Player → go.SetActive(false); go.AddComponent<Player>()  [extends MonoBehaviour]
+  Inventory → new Inventory(GameSettings gs)  [plain C# class]  NOTE: GameSettings admite valores por omisión
+  Waypoint → new Waypoint()  [plain C# class]
+
+Computed Properties (GetField returns null — set underlying data instead):
+  Current: devuelve el último de _list
+    → Control via: _list — agregar un elemento

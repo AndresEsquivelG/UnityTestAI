@@ -2,7 +2,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { buildChatFixerPrompt } from "../prompts/promptBuilder";
+import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
+import { readCodeField } from "../utils/codeField";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
 
@@ -21,12 +23,19 @@ export type ChatFixerOutput = z.infer<typeof chatFixerOutputSchema>;
 // ── Input ──────────────────────────────────────────────────────────────────────
 
 export interface ChatFixerInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   testCode: string;
   assembledContext: string;
   userMessage: string;
   className: string;
   methodName: string;
   workspaceRoot: string;
+  /**
+   * Carpeta de los volcados dentro de `AgentOutputs`. La corrección automática
+   * usa una por ciclo para que un ciclo no pise el prompt del anterior.
+   */
+  dumpDir?: string;
 }
 
 // ── Main function ──────────────────────────────────────────────────────────────
@@ -49,10 +58,11 @@ export async function runChatFixer(
   input: ChatFixerInput,
   llmHandler: (prompt: string) => Promise<string>
 ): Promise<ChatFixerOutput> {
-  const dumpDir = path.join(input.workspaceRoot, "AgentOutputs", "chat-fixer");
+  const dumpDir = path.join(input.workspaceRoot, "AgentOutputs", input.dumpDir ?? "chat-fixer");
   fs.mkdirSync(dumpDir, { recursive: true });
 
   const prompt = buildChatFixerPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.assembledContext,
@@ -72,7 +82,15 @@ export async function runChatFixer(
     if (!jsonMatch) {
       throw new Error("No JSON object found in chat fixer response");
     }
-    result = chatFixerOutputSchema.parse(JSON.parse(JsonSanitizer.sanitize(jsonMatch[0])));
+    const parsed = chatFixerOutputSchema.parse(JSON.parse(JsonSanitizer.sanitize(jsonMatch[0])));
+    if (parsed.status === "FIXED") {
+      const fixed = readCodeField(parsed.correctedCode);
+      result = fixed.ok
+        ? { ...parsed, correctedCode: fixed.code }
+        : { status: "ERROR", message: `Discarded the fixer's correction: ${fixed.reason}` };
+    } else {
+      result = parsed;
+    }
   } catch (err: any) {
     result = { status: "ERROR", message: `Failed to parse fixer response: ${err.message}` };
   }

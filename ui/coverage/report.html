@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Todo va adentro de este archivo: no se carga nada de afuera. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>Informe de cobertura</title>
+    <!--
+      Plantilla del informe de cobertura. La extensión reemplaza el marcador
+      del bloque de datos por el JSON de la medición; el resto lo dibuja el
+      script de abajo con textContent, así que el código fuente nunca se
+      interpreta como HTML. Abierta tal cual, muestra que no tiene datos.
+    -->
+    <style>
+      /*
+        En el navegador manda el tema del sistema. En una pestaña de VS Code,
+        prefers-color-scheme también sigue al sistema y no al editor, así que
+        manda la clase que VS Code le pone al body con el tema del editor.
+      */
+      :root,
+      body.vscode-light,
+      body.vscode-high-contrast-light {
+        --bg: #ffffff;
+        --fg: #1f2328;
+        --muted: #59636e;
+        --border: #d1d9e0;
+        --card: #f6f8fa;
+        --covered: #dafbe1;
+        --covered-mark: #1a7f37;
+        --partial: #fff8c5;
+        --partial-mark: #9a6700;
+        --missed: #ffebe9;
+        --missed-mark: #cf222e;
+        --target: #ddf4ff;
+        --bar: #1a7f37;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d1117;
+          --fg: #e6edf3;
+          --muted: #9198a1;
+          --border: #3d444d;
+          --card: #151b23;
+          --covered: #12261e;
+          --covered-mark: #3fb950;
+          --partial: #272115;
+          --partial-mark: #d29922;
+          --missed: #2d1517;
+          --missed-mark: #f85149;
+          --target: #121d2f;
+          --bar: #3fb950;
+        }
+      }
+      body.vscode-dark,
+      body.vscode-high-contrast:not(.vscode-high-contrast-light) {
+        --bg: #0d1117;
+        --fg: #e6edf3;
+        --muted: #9198a1;
+        --border: #3d444d;
+        --card: #151b23;
+        --covered: #12261e;
+        --covered-mark: #3fb950;
+        --partial: #272115;
+        --partial-mark: #d29922;
+        --missed: #2d1517;
+        --missed-mark: #f85149;
+        --target: #121d2f;
+        --bar: #3fb950;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 24px 16px 48px;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { max-width: 1100px; margin: 0 auto; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      h2 { font-size: 16px; margin: 32px 0 8px; word-break: break-all; }
+      .meta { color: var(--muted); margin: 0 0 20px; }
+      h1, .meta { overflow-wrap: anywhere; }
+      .scroll { overflow-x: auto; }
+      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+      .card__label { color: var(--muted); font-size: 12px; }
+      .card__value { font-size: 26px; font-weight: 600; }
+      .card__detail { color: var(--muted); font-size: 12px; }
+      .notes { margin: 16px 0 0; padding-left: 20px; color: var(--muted); }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+      th { color: var(--muted); font-weight: 500; font-size: 12px; }
+      td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+      tr.is-target td { background: var(--target); font-weight: 600; }
+      .bar { width: 120px; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+      .bar > span { display: block; height: 100%; background: var(--bar); }
+      .legend { display: flex; flex-wrap: wrap; gap: 16px; margin: 16px 0 8px; color: var(--muted); font-size: 12px; }
+      .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; vertical-align: -1px; }
+      .legend .covered::before { background: var(--covered-mark); }
+      .legend .partial::before { background: var(--partial-mark); }
+      .legend .missed::before { background: var(--missed-mark); }
+      .code { border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; }
+      .code table { margin: 0; font: 12px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace; }
+      .code td { border: 0; padding: 0 10px; white-space: pre; }
+      .code td.ln { width: 1%; text-align: right; color: var(--muted); user-select: none; border-left: 4px solid transparent; }
+      .code tr.covered td { background: var(--covered); }
+      .code tr.covered td.ln { border-left-color: var(--covered-mark); }
+      .code tr.partial td { background: var(--partial); }
+      .code tr.partial td.ln { border-left-color: var(--partial-mark); }
+      .code tr.missed td { background: var(--missed); }
+      .code tr.missed td.ln { border-left-color: var(--missed-mark); }
+      .empty { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <main id="report">
+      <h1>Informe de cobertura</h1>
+      <p class="meta">Esta plantilla no tiene datos: la extensión los agrega al medir.</p>
+    </main>
+
+    <script id="coverage-data" type="application/json">"__COVERAGE_DATA__"</script>
+    <script>
+      (function () {
+        var data = JSON.parse(document.getElementById("coverage-data").textContent);
+        if (!data || typeof data !== "object") return;
+
+        var STATUS_LABEL = { covered: "cubierta", partial: "parcial", missed: "sin cubrir" };
+        var root = document.getElementById("report");
+        root.replaceChildren();
+
+        function el(tag, className, text) {
+          var node = document.createElement(tag);
+          if (className) node.className = className;
+          if (text !== undefined) node.textContent = text;
+          return node;
+        }
+
+        function percent(metric) {
+          return String(Math.round(metric.percentage * 10) / 10).replace(".", ",") + " %";
+        }
+
+        function counts(metric, counted) {
+          return metric.covered + " de " + metric.total + " " + counted;
+        }
+
+        function card(label, value, detail) {
+          var node = el("div", "card");
+          node.appendChild(el("div", "card__label", label));
+          node.appendChild(el("div", "card__value", value));
+          if (detail) node.appendChild(el("div", "card__detail", detail));
+          return node;
+        }
+
+        document.title = data.title;
+        root.appendChild(el("h1", "", data.title));
+        var when = new Date(data.generatedAt);
+        root.appendChild(
+          el("p", "meta", "Prueba " + data.testName + " · medida el " + when.toLocaleString("es"))
+        );
+
+        var cards = el("div", "cards");
+        cards.appendChild(
+          data.target
+            ? card("Método bajo prueba", percent(data.target.line), counts(data.target.line, "líneas"))
+            : card("Método bajo prueba", "—", "Sin código medible con ese nombre")
+        );
+        cards.appendChild(card("Archivo", percent(data.line), counts(data.line, "líneas")));
+        cards.appendChild(
+          data.decision
+            ? card("Decisión", percent(data.decision), counts(data.decision, "decisiones"))
+            : card("Decisión", "No disponible", "La herramienta no la mide")
+        );
+        root.appendChild(cards);
+
+        if (data.notes.length) {
+          var notes = el("ul", "notes");
+          data.notes.forEach(function (note) {
+            notes.appendChild(el("li", "", note));
+          });
+          root.appendChild(notes);
+        }
+
+        data.files.forEach(function (file) {
+          root.appendChild(el("h2", "", file.filePath));
+
+          var table = el("table");
+          var head = el("tr");
+          ["Método", "Línea", "Cobertura", ""].forEach(function (title) {
+            head.appendChild(el("th", "", title));
+          });
+          table.appendChild(head);
+          file.units.forEach(function (unit) {
+            var row = el("tr", unit.isTarget ? "is-target" : "");
+            row.appendChild(el("td", "", unit.name + (unit.isTarget ? " (bajo prueba)" : "")));
+            row.appendChild(el("td", "num", String(unit.firstLine)));
+            row.appendChild(el("td", "num", percent(unit.line) + " · " + unit.line.covered + " de " + unit.line.total));
+            var barCell = el("td");
+            var bar = el("div", "bar");
+            var fill = el("span");
+            fill.style.width = unit.line.percentage + "%";
+            bar.appendChild(fill);
+            barCell.appendChild(bar);
+            row.appendChild(barCell);
+            table.appendChild(row);
+          });
+          var tableWrap = el("div", "scroll");
+          tableWrap.appendChild(table);
+          root.appendChild(tableWrap);
+
+          var legend = el("div", "legend");
+          ["covered", "partial", "missed"].forEach(function (status) {
+            legend.appendChild(el("span", status, STATUS_LABEL[status]));
+          });
+          legend.appendChild(el("span", "", "sin color: sin código medible"));
+          root.appendChild(legend);
+
+          if (file.sourceError) {
+            root.appendChild(el("p", "empty", file.sourceError));
+            return;
+          }
+          var code = el("div", "code");
+          var lines = el("table");
+          file.source.forEach(function (line) {
+            var row = el("tr", line.status || "");
+            if (line.status) row.title = "Línea " + line.number + ": " + STATUS_LABEL[line.status];
+            row.appendChild(el("td", "ln", String(line.number)));
+            row.appendChild(el("td", "", line.text));
+            lines.appendChild(row);
+          });
+          code.appendChild(lines);
+          root.appendChild(code);
+        });
+      })();
+    </script>
+  </body>
+</html>

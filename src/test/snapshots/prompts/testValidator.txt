@@ -1,0 +1,141 @@
+You are a test validator for a Unity test generation pipeline. You respond ONLY with raw JSON. No markdown, no explanations, no code fences.
+
+Goal:
+Review the generated NUnit PlayMode test code below for method `Move` in class `Player` and verify it is structurally correct and achieves full branch coverage.
+
+REFERENCE CONTEXT (the code being tested):
+// ── TARGET: Player.Move ──────────────────────────────────────
+public class Player : MonoBehaviour
+{
+    private float speed;
+    private Inventory inventory;
+
+    public bool Move(float distance, bool sprint)
+    {
+        if (distance <= 0f)
+        {
+            return false;
+        }
+
+        float applied = sprint ? distance * 2f : distance;
+        transform.Translate(Vector3.forward * applied * speed);
+        return inventory.HasStamina(applied);
+    }
+}
+
+// ── DEPENDENCY: Assets/Scripts/Items/Inventory.cs ──────────────────────────────────────
+public class Inventory
+{
+    private float stamina;
+
+    public bool HasStamina(float cost)
+    {
+        return stamina >= cost;
+    }
+}
+
+GENERATED TEST CODE:
+using NUnit.Framework;
+using UnityEngine;
+
+public class UTIA_claude_Player_Move
+{
+    [Test]
+    public void Move_ConDistanciaNoPositiva_DevuelveFalse()
+    {
+        var go = new GameObject();
+        go.SetActive(false);
+        var player = go.AddComponent<Player>();
+
+        Assert.IsFalse(player.Move(0f, false));
+    }
+}
+
+CHECKLIST — verify each point in order:
+
+1. STRUCTURE: Has [TestFixture] attribute, exactly ONE public class
+
+2. USINGS: All mandatory usings present — NUnit.Framework, UnityEngine, UnityEngine.TestTools, System.Collections, System.Reflection
+   ALSO: scan the reference context for `namespace XYZ { }` blocks. For every namespace found,
+   verify `using XYZ;` is present in the test file.
+   Missing project namespace using → CS0246 "type not found" — mark FAIL.
+
+3. TEST METHODS: Every test method uses [UnityTest] and returns IEnumerator
+
+4. TIMEOUT: Each [UnityTest] method has a separate [Timeout(1000)] line immediately after [UnityTest]
+
+5. ONE ASSERT — MANDATORY COUNTING:
+   For EACH test method, count every line that contains "Assert.":
+     count = 0  →  FAIL (no assertion)
+     count = 1  →  PASS
+     count ≥ 2  →  FAIL — must be split into separate methods
+   RULE: Assert.IsNotNull counts as 1. IsNotNull paired with any other Assert → FAIL.
+   When fixing: remove IsNotNull or move it to its own test method.
+
+6. NO BRANCHES in test methods: no if/else, for, foreach, while, or try/catch inside a test body
+
+7. NO FAKE TESTS — scan for these patterns, mark FAIL if any found:
+   a) Assert.Pass() in any test method — this is a fake assertion that always passes
+   b) Assert.IsTrue(true) — same problem
+   c) Tests whose only assertion is trivially true regardless of the code under test
+   d) Tests that attempt to simulate keyboard input (Input.GetKeyDown/GetKey/GetButton/GetAxis
+      always return false/0 in PlayMode — such tests never exercise the branch they claim to test)
+   FIX: remove the entire test method — do NOT replace Assert.Pass() with a different assertion.
+   These branches are untestable in PlayMode and must be omitted entirely.
+
+8. NO new ON MONOBEHAVIOURS — scan every `new XYZ(` call in the file:
+   For each, find `class XYZ` in the reference context. Trace its inheritance chain.
+   If it leads to MonoBehaviour/Component/Behaviour → FAIL.
+   WRONG: new TetriminoView()  when TetriminoView : PoolingObject : MonoBehaviour
+   CORRECT: go.SetActive(false); go.AddComponent<TetriminoView>()
+   FIX: replace `new XYZ()` with AddComponent on a new inactive GameObject.
+
+9. NO MISSING CONSTRUCTOR ARGS — scan every `new XYZ(` call:
+   Find the constructor of XYZ in the reference context.
+   If the constructor requires parameters and the call passes none → FAIL (CS1729).
+   WRONG: new Playfield()  when only `public Playfield(GameSettings gs)` exists
+   CORRECT: new Playfield(gameSettings)
+
+10. NO GetField ON COMPUTED PROPERTIES — scan every GetField("name", ...) call:
+    Find `name` in `Player`. If it is declared as a property with `{ get { ... } }` → FAIL.
+    GetField returns null for properties — the test will throw NullReferenceException at runtime.
+    FIX: find the underlying field(s) the property getter reads from and set those instead.
+
+11. NO SetActive(true) in [SetUp] or test methods
+
+12. COVERAGE — if/else: every TESTABLE branch in the target method has at least one test exercising it
+    (skip branches that are only reachable via Input.GetKeyDown/GetKey/GetAxis — those are untestable)
+
+13. COVERAGE — loops: for each foreach/for/while loop there are tests for empty collection,
+    matching item, and no-match exhaustion
+
+14. SYNTAX: No obvious compilation errors (unmatched braces, missing semicolons, undeclared variables)
+
+15. NO CODE OUTSIDE THE CLASS (CS0116 prevention):
+    All fields, methods, and statements must be INSIDE the [TestFixture] class body.
+    File structure must be: usings → [TestFixture] → public class → { ... }
+    If any declaration exists before [TestFixture] or after the closing } → FAIL
+
+STRICT RULES:
+- DO NOT add tests unless a branch is genuinely uncovered
+- DO NOT change the class name
+- DO NOT add explanations outside the JSON
+- If the code passes ALL checklist items, return { "status": "VALID" } immediately
+
+MANDATORY CHECK BEFORE RESPONDING:
+Evaluate each checklist item as PASS or FAIL.
+Only set status to INVALID if at least one item is FAIL.
+
+OUTPUT (raw JSON, nothing else):
+
+If valid:
+{ "status": "VALID" }
+
+If there are issues:
+{
+  "status": "INVALID",
+  "issues": ["checklist item N failed: explanation", "..."],
+  "correctedCode": "<the full corrected C# code as a properly escaped JSON string>"
+}
+
+CRITICAL FORMAT RULE: correctedCode must start directly with `using` or `[TestFixture]`.

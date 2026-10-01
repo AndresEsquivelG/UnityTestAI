@@ -72,22 +72,27 @@ export function updateAgentStatus(agentName, status, detail) {
 
   item.className = `agent-step agent-step--${status}`;
 
+  // Con textContent y no con innerHTML: el detalle trae texto del modelo y
+  // mensajes del compilador, que pueden tener «<» y «>».
+  const name = document.createElement("span");
+  name.className = "agent-step__name";
+  name.textContent = agentName;
+
+  const label = document.createElement("span");
+  label.className = "agent-step__label";
+  label.textContent = status === "running" || !detail ? status : `${status}: ${detail}`;
+
+  item.replaceChildren(name, label);
+
   if (status === "running") {
-    item.innerHTML = `
-      <span class="agent-step__name">${agentName}</span>
-      <span class="agent-step__label">running</span>
-      <span class="agent-step__dots"><span></span><span></span><span></span></span>
-    `;
-  } else if (status === "done") {
-    item.innerHTML = `
-      <span class="agent-step__name">${agentName}</span>
-      <span class="agent-step__label">done</span>
-    `;
-  } else {
-    item.innerHTML = `
-      <span class="agent-step__name">${agentName}</span>
-      <span class="agent-step__label">error${detail ? `: ${detail}` : ""}</span>
-    `;
+    const dots = document.createElement("span");
+    dots.className = "agent-step__dots";
+    dots.append(
+      document.createElement("span"),
+      document.createElement("span"),
+      document.createElement("span")
+    );
+    item.appendChild(dots);
   }
 }
 
@@ -102,8 +107,9 @@ export function clearAgentPipeline() {
 
 /**
  * Shows resolved dependency file paths as sub-items under the last agent step.
- * No title — just the file list appended directly.
- * @param {{ path: string, found: boolean }[]} files
+ * No title — just the file list appended directly. Las que detectó el
+ * adaptador y el agente no había pedido llevan una marca.
+ * @param {{ path: string, found: boolean, detected?: boolean }[]} files
  */
 export function showDependencyFilesList(files) {
   const pipeline = document.getElementById("agentPipeline");
@@ -122,7 +128,7 @@ export function showDependencyFilesList(files) {
     row.className = f.found
       ? "agent-dep-files__item agent-dep-files__item--found"
       : "agent-dep-files__item agent-dep-files__item--missing";
-    row.textContent = `${f.found ? "\u2713" : "\u2717"} ${f.path}`;
+    row.textContent = `${f.found ? "\u2713" : "\u2717"} ${f.path}${f.detected ? " (detectada)" : ""}`;
     list.appendChild(row);
   }
 
@@ -152,6 +158,152 @@ export function showContextBuilderSlices(slices) {
   }
 
   ctxStep.after(list);
+}
+
+// === Verificación y ejecución del artefacto ===
+//
+// Las dos etapas usan el mismo bloque, cada una en su contenedor: el núcleo
+// compone el resultado de la ejecución con la misma forma que el de la
+// verificación.
+
+/**
+ * Muestra que la etapa está en curso. Deshabilita el reintento: una segunda
+ * corrida a la vez chocaría con la primera por el mismo proyecto.
+ * @param {string} stageName
+ * @param {string} [panelId]
+ */
+export function showVerificationRunning(stageName, panelId = "verificationPanel") {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+
+  panel.replaceChildren();
+  panel.className = "verification verification--running";
+  panel.style.display = "block";
+
+  const header = document.createElement("div");
+  header.className = "verification__header";
+  header.textContent = `${stageName}: en curso…`;
+  panel.appendChild(header);
+}
+
+/**
+ * Muestra el resultado ya compuesto por el núcleo. Todo el texto entra con
+ * textContent: los mensajes del compilador traen «<» y «>» de los genéricos.
+ *
+ * Mientras la corrección automática trabaja sobre este resultado no se ofrece
+ * reintentar, por el mismo motivo que durante la verificación.
+ * @param {{ stageName: string, status: string, summary: string,
+ *           remediation?: string, note?: string, inProgress?: boolean,
+ *           retryable?: boolean,
+ *           cases?: { outcome: "passed" | "failed" | "skipped", name: string, detail?: string }[],
+ *           details?: string[],
+ *           diagnostics: { severity: string, location: string, code?: string, message: string }[] }} verification
+ * @param {() => void} onRetry
+ * @param {string} [panelId]
+ * @param {{ label: string, run: () => void }} [action] Botón propio de la etapa.
+ */
+export function showVerification(verification, onRetry, panelId = "verificationPanel", action) {
+  const panel = document.getElementById(panelId);
+  if (!panel || !verification) return;
+
+  panel.replaceChildren();
+  panel.className = `verification verification--${verification.status}`;
+  panel.style.display = "block";
+
+  const header = document.createElement("div");
+  header.className = "verification__header";
+  header.textContent = `${verification.stageName}: ${verification.summary}`;
+  panel.appendChild(header);
+
+  if (verification.note) {
+    const note = document.createElement("div");
+    note.className = "verification__note";
+    note.textContent = verification.note;
+    panel.appendChild(note);
+  }
+
+  if (verification.remediation) {
+    const remediation = document.createElement("div");
+    remediation.className = "verification__remediation";
+    remediation.textContent = `→ ${verification.remediation}`;
+    panel.appendChild(remediation);
+  }
+
+  // Solo la ejecución trae pruebas: cada una con su resultado, las fallidas
+  // primero, como las ordenó el núcleo.
+  if (verification.cases && verification.cases.length) {
+    const marks = { passed: "✓", failed: "✗", skipped: "○" };
+    const list = document.createElement("div");
+    list.className = "verification__cases";
+    for (const c of verification.cases) {
+      const row = document.createElement("div");
+      row.className = `verification__case verification__case--${c.outcome}`;
+      row.textContent = `${marks[c.outcome] ?? "?"} ${c.name}${c.detail ? ` — ${c.detail}` : ""}`;
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+  }
+
+  // Solo la cobertura trae detalles: las demás cifras y las notas.
+  if (verification.details && verification.details.length) {
+    const list = document.createElement("div");
+    list.className = "verification__details";
+    for (const detail of verification.details) {
+      const row = document.createElement("div");
+      row.className = "verification__detail";
+      row.textContent = detail;
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+  }
+
+  if (verification.diagnostics.length) {
+    const list = document.createElement("div");
+    list.className = "verification__diagnostics";
+    for (const d of verification.diagnostics) {
+      const row = document.createElement("div");
+      row.className = `verification__diagnostic verification__diagnostic--${d.severity}`;
+      row.textContent = `${d.location}  ${d.code ? `${d.code}: ` : ""}${d.message}`;
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+  }
+
+  // Sin reintento cuando la etapa no aplica o el núcleo dice que reintentar
+  // no cambiaría nada: no hay nada que volver a correr.
+  if (
+    verification.status !== "notApplicable" &&
+    !verification.inProgress &&
+    verification.retryable !== false
+  ) {
+    const retry = document.createElement("button");
+    retry.className = "verification__retry";
+    retry.textContent = `Volver a intentar: ${verification.stageName.toLowerCase()}`;
+    retry.addEventListener("click", () => {
+      retry.disabled = true;
+      onRetry();
+    });
+    panel.appendChild(retry);
+  }
+
+  if (action) {
+    const button = document.createElement("button");
+    button.className = "verification__retry";
+    button.textContent = action.label;
+    button.addEventListener("click", action.run);
+    panel.appendChild(button);
+  }
+}
+
+/**
+ * Oculta el resultado de una corrida anterior.
+ * @param {string} [panelId]
+ */
+export function hideVerification(panelId = "verificationPanel") {
+  const panel = document.getElementById(panelId);
+  if (!panel) return;
+  panel.replaceChildren();
+  panel.style.display = "none";
 }
 
 export function enterGenerationMode() {
