@@ -20,7 +20,7 @@
  *   OP-12  Lista de incumplimientos      → PreconditionViolation[]    materialization.ts
  *   OP-13  Resultado de verificación(op) → VerificationResult         verification.ts
  *   OP-14  Resultado de ejecución   (op) → TestExecutionResult        verification.ts
- *   OP-15  Informe de cobertura     (op) → CoverageReport             verification.ts
+ *   OP-15  Informe de cobertura     (op) → CoverageResult             verification.ts
  *   OP-16  Ciclo de vida            (op) → void                       ecosystemAdapter.ts
  *   OP-17  Dependencias detectadas  (op) → string[]                   ecosystemAdapter.ts
  *
@@ -74,17 +74,25 @@ export type {
 } from "./materialization";
 
 export type {
+  CompletedTestRun,
+  CoverageMeasured,
   CoverageMetric,
+  CoverageNotRun,
   CoverageReport,
+  CoverageResult,
+  CoverageTarget,
   Diagnostic,
   DiagnosticSeverity,
   FileCoverage,
+  LineCoverage,
+  LineCoverageStatus,
   TestCaseOutcome,
   TestCaseResult,
   TestExecutionResult,
   TestRunFailed,
   TestRunNotRun,
   TestRunPassed,
+  UnitCoverage,
   VerificationFailed,
   VerificationNotRun,
   VerificationPassed,

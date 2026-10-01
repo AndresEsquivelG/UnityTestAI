@@ -19,7 +19,9 @@ import type {
   PreconditionViolation,
 } from "./materialization";
 import type {
-  CoverageReport,
+  CompletedTestRun,
+  CoverageResult,
+  CoverageTarget,
   TestExecutionResult,
   VerificationResult,
 } from "./verification";
@@ -173,17 +175,31 @@ export interface EcosystemAdapter {
    * Ejecuta solo las pruebas del artefacto que describe `spec`, no las del
    * proyecto entero: el resultado tiene que hablar de la prueba generada, y
    * las demás pueden tardar o fallar por su cuenta.
+   *
+   * Con `coverage`, pide además los datos de cobertura de ese archivo en la
+   * misma corrida y los devuelve crudos en `rawCoverage`. El núcleo lo pasa
+   * solo si el adaptador declara cobertura.
    */
-  runTests?(project: ProjectModel, spec: ArtifactSpec): Promise<TestExecutionResult>;
+  runTests?(
+    project: ProjectModel,
+    spec: ArtifactSpec,
+    coverage?: CoverageTarget
+  ): Promise<TestExecutionResult>;
 
   /**
-   * OP-15 — Recolección del informe de cobertura de la ejecución. OPCIONAL.
+   * OP-15 — Informe de cobertura de una ejecución. OPCIONAL.
    * Presente si y solo si `capabilities.coverage` es true.
+   *
+   * Recibe solo una corrida en la que las pruebas sí se ejecutaron: sin
+   * ejecución no hay nada que medir, y eso lo resuelve el núcleo antes de
+   * llamar. Convierte los datos que dejó `runTests`, y puede pedirle algo más
+   * a la herramienta, como el total de lo medible.
    */
   collectCoverage?(
     project: ProjectModel,
-    execution: TestExecutionResult
-  ): Promise<CoverageReport>;
+    execution: CompletedTestRun,
+    target: CoverageTarget
+  ): Promise<CoverageResult>;
 
   // ── Ciclo de vida ────────────────────────────────────────────────────────
 

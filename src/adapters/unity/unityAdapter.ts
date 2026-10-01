@@ -5,6 +5,9 @@ import type {
   ArtifactRequest,
   ArtifactSpec,
   CapabilityMap,
+  CompletedTestRun,
+  CoverageResult,
+  CoverageTarget,
   DependencyResolution,
   DetectionContext,
   EcosystemAdapter,
@@ -26,6 +29,7 @@ import { unityAnalysisSchema } from "./analysisSchema";
 import { checkUnityPreconditions, normalizeUnityCode, specifyUnityArtifact } from "./artifact";
 import { compileUnityProject } from "./compilation";
 import { runUnityTests } from "./testRun";
+import { collectUnityCoverage } from "./coverage";
 import { detectUnityDependencies } from "./dependencies";
 import { systemEditorToolchain, type UnityEditorToolchain } from "./editor";
 
@@ -41,13 +45,14 @@ export interface UnityAdapterOptions {
  * Adaptador del ecosistema Unity / C#.
  *
  * Primera implementación de la interfaz de adaptación. Cubre las once
- * operaciones obligatorias y cuatro de las seis opcionales: OP-09; OP-13 y
- * OP-14, que compilan el proyecto y ejecutan la prueba con el editor de Unity
- * en modo batch, y OP-17, que detecta los tipos del proyecto que usa la
- * unidad.
+ * operaciones obligatorias y cinco de las seis opcionales: OP-09; OP-13,
+ * OP-14 y OP-15, que compilan el proyecto, ejecutan la prueba y miden su
+ * cobertura con el editor de Unity en modo batch, y OP-17, que detecta los
+ * tipos del proyecto que usa la unidad.
  *
- * Cobertura y ciclo de vida se declaran en falso porque hoy es cierto. Cuando se implementen, esta declaración cambia aquí y el núcleo no se
- * entera.
+ * El ciclo de vida se declara en falso porque hoy es cierto: no hay
+ * artefactos temporales que preparar ni limpiar. Cuando los haya, esta
+ * declaración cambia aquí y el núcleo no se entera.
  *
  * Nada de este archivo depende del editor de código: el adaptador recibe rutas
  * y devuelve datos, de modo que se puede ejercitar sin abrir el entorno.
@@ -69,7 +74,7 @@ export class UnityAdapter implements EcosystemAdapter {
   readonly capabilities: CapabilityMap = {
     verification: "compile",
     runTests: true,
-    coverage: false,
+    coverage: true,
     analysisSchemaExtension: true,
     lifecycle: false,
     dependencyDetection: true,
@@ -130,7 +135,19 @@ export class UnityAdapter implements EcosystemAdapter {
     return compileUnityProject(project, spec, { toolchain: this.toolchain });
   }
 
-  runTests(project: ProjectModel, spec: ArtifactSpec): Promise<TestExecutionResult> {
-    return runUnityTests(project, spec, { toolchain: this.toolchain });
+  runTests(
+    project: ProjectModel,
+    spec: ArtifactSpec,
+    coverage?: CoverageTarget
+  ): Promise<TestExecutionResult> {
+    return runUnityTests(project, spec, { toolchain: this.toolchain }, coverage);
+  }
+
+  collectCoverage(
+    project: ProjectModel,
+    execution: CompletedTestRun,
+    target: CoverageTarget
+  ): Promise<CoverageResult> {
+    return collectUnityCoverage(project, execution, target, { toolchain: this.toolchain });
   }
 }

@@ -1,6 +1,8 @@
 import {
+  supportsCoverage,
   supportsTestRun,
   type ArtifactSpec,
+  type CoverageTarget,
   type EcosystemAdapter,
   type ProjectModel,
   type TestCaseOutcome,
@@ -32,11 +34,17 @@ export const TEST_RUN_STAGE_NAME = "Ejecución";
 /** La etapa no corrió porque la prueba no pasó la verificación. */
 const NEEDS_VERIFICATION = "core.test-run-needs-verification";
 
+/**
+ * Con `coverage`, la misma corrida deja los datos de cobertura de ese
+ * archivo, si el adaptador la ofrece: medir aparte obligaría a ejecutar dos
+ * veces.
+ */
 export async function runTestStage(
   adapter: EcosystemAdapter,
   project: ProjectModel,
   spec: ArtifactSpec,
-  verification: VerificationOutcome["status"]
+  verification: VerificationOutcome["status"],
+  coverage?: CoverageTarget
 ): Promise<TestRunOutcome> {
   if (!supportsTestRun(adapter)) {
     return { status: "notApplicable" };
@@ -54,7 +62,11 @@ export async function runTestStage(
   }
 
   try {
-    return await adapter.runTests(project, spec);
+    return await adapter.runTests(
+      project,
+      spec,
+      supportsCoverage(adapter) ? coverage : undefined
+    );
   } catch (error) {
     // La prueba ya está escrita y verificada: que el adaptador falle no
     // justifica perder la corrida.

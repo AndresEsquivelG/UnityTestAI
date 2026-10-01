@@ -196,11 +196,13 @@ export function showVerificationRunning(stageName, panelId = "verificationPanel"
  *           remediation?: string, note?: string, inProgress?: boolean,
  *           retryable?: boolean,
  *           cases?: { outcome: "passed" | "failed" | "skipped", name: string, detail?: string }[],
+ *           details?: string[],
  *           diagnostics: { severity: string, location: string, code?: string, message: string }[] }} verification
  * @param {() => void} onRetry
  * @param {string} [panelId]
+ * @param {{ label: string, run: () => void }} [action] Botón propio de la etapa.
  */
-export function showVerification(verification, onRetry, panelId = "verificationPanel") {
+export function showVerification(verification, onRetry, panelId = "verificationPanel", action) {
   const panel = document.getElementById(panelId);
   if (!panel || !verification) return;
 
@@ -242,6 +244,19 @@ export function showVerification(verification, onRetry, panelId = "verificationP
     panel.appendChild(list);
   }
 
+  // Solo la cobertura trae detalles: las demás cifras y las notas.
+  if (verification.details && verification.details.length) {
+    const list = document.createElement("div");
+    list.className = "verification__details";
+    for (const detail of verification.details) {
+      const row = document.createElement("div");
+      row.className = "verification__detail";
+      row.textContent = detail;
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+  }
+
   if (verification.diagnostics.length) {
     const list = document.createElement("div");
     list.className = "verification__diagnostics";
@@ -269,6 +284,14 @@ export function showVerification(verification, onRetry, panelId = "verificationP
       onRetry();
     });
     panel.appendChild(retry);
+  }
+
+  if (action) {
+    const button = document.createElement("button");
+    button.className = "verification__retry";
+    button.textContent = action.label;
+    button.addEventListener("click", action.run);
+    panel.appendChild(button);
   }
 }
 

@@ -55,10 +55,6 @@ export interface ArtifactSpec {
  * subsanación deja a la persona usuaria con un fallo genérico y sin saber qué
  * hacer.
  *
- * Hoy la única precondición verificada en el pipeline vivo es la existencia de
- * la carpeta Tests/ (src/agents/testGenerator.ts:87-93). La comprobación del
- * archivo .asmdef existe en src/utils/testSaver.ts:30-35, pero ese módulo es
- * código muerto: se importa en webviewManager y nunca se invoca.
  */
 export interface PreconditionViolation {
   /** Código estable del incumplimiento, para trazarlo sin depender del mensaje. */

@@ -58,7 +58,13 @@ describe("registro de adaptadores", () => {
     it("rechaza una operación implementada sin declarar la capacidad", () => {
       const adapter = createStubAdapter({
         id: "callado",
-        optional: { collectCoverage: async () => ({ line: { covered: 0, total: 0, percentage: 0 }, byFile: [] }) },
+        optional: {
+          collectCoverage: async () => ({
+            status: "measured",
+            line: { covered: 0, total: 0, percentage: 0 },
+            byFile: [],
+          }),
+        },
       });
 
       assert.deepEqual(findCapabilityMismatches(adapter), [

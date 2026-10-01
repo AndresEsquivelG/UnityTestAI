@@ -11,6 +11,7 @@ import {
 } from "../llm";
 import type { ActiveEcosystem } from "../core/adapters";
 import {
+  supportsCoverage,
   supportsDependencyDetection,
   supportsSchemaExtension,
   supportsTestRun,
@@ -18,6 +19,7 @@ import {
 } from "../core/contracts";
 import type {
   ArtifactSpec,
+  CoverageTarget,
   ProjectModel,
   PromptProfile,
   SymbolCandidate,
@@ -33,15 +35,21 @@ import {
   type ResolvedDependency,
 } from "../core/project";
 import {
+  COVERAGE_STAGE_NAME,
   TEST_RUN_STAGE_NAME,
+  buildCoverageDocument,
+  presentCoverage,
   presentRepairProgress,
   presentRepairResult,
   presentTestRun,
+  renderCoverageDocument,
+  runCoverageStage,
   runTestStage,
   verificationStageName,
   verifyAndRepair,
   type RepairReply,
   type RepairRequest,
+  type TestRunOutcome,
   type VerificationOutcome,
   type VerificationPresentation,
 } from "../core/verification";
@@ -89,8 +97,26 @@ type TestContext = {
   spec: ArtifactSpec;
   /** Perfil de la corrida, para que el corrector componga el mismo prompt. */
   profile: PromptProfile;
+  /** Archivo y unidad bajo prueba, sobre los que se mide la cobertura (OP-15). */
+  coverageTarget: CoverageTarget;
 };
 const testContextByPanel = new WeakMap<vscode.WebviewPanel, TestContext>();
+
+/**
+ * Plantilla del informe de cobertura. Empaquetado, este módulo queda en
+ * `dist/`, y la plantilla en `ui/coverage/`, como las plantillas de prompt
+ * en `prompts/`.
+ */
+const COVERAGE_TEMPLATE = path.join(__dirname, "..", "ui", "coverage", "report.html");
+
+/** Informe HTML de la última medición de cada panel, si se pudo escribir. */
+const coverageReportByPanel = new WeakMap<
+  vscode.WebviewPanel,
+  { path: string; title: string }
+>();
+
+/** Pestaña con el informe de cobertura de cada panel, mientras esté abierta. */
+const coverageTabByPanel = new WeakMap<vscode.WebviewPanel, vscode.WebviewPanel>();
 
 /**
  * Paneles con una verificación en curso, con su corrección automática. Mientras
@@ -330,8 +356,15 @@ async function verifyInPanel(
     showVerification(presentRepairResult(kind, result));
     verificationStatusByPanel.set(panel, outcome.status);
 
-    // ── OP-14: ejecución, solo con la prueba ya verificada ─────────────────
-    await executeInPanel(panel, ecosystem, project, spec, outcome.status);
+    // ── OP-14 y OP-15: ejecución y cobertura, con la prueba ya verificada ──
+    await executeInPanel(
+      panel,
+      ecosystem,
+      project,
+      spec,
+      outcome.status,
+      testCtx.coverageTarget,
+    );
   } catch (err: any) {
     // La prueba ya está escrita: un fallo aquí no invalida la generación.
     showVerification({
@@ -348,7 +381,8 @@ async function verifyInPanel(
 
 /**
  * Ejecuta las pruebas del artefacto (OP-14) y muestra los contadores debajo
- * de la verificación. Quien llama tiene que haber marcado el panel como
+ * de la verificación; después mide la cobertura con los datos de esa misma
+ * corrida (OP-15). Quien llama tiene que haber marcado el panel como
  * ocupado: la ejecución abre el mismo proyecto que la verificación.
  */
 async function executeInPanel(
@@ -357,6 +391,7 @@ async function executeInPanel(
   project: ProjectModel,
   spec: ArtifactSpec,
   verification: VerificationOutcome["status"],
+  coverageTarget: CoverageTarget,
 ) {
   const { adapter } = ecosystem;
   const willRun =
@@ -370,7 +405,13 @@ async function executeInPanel(
   }
 
   const started = Date.now();
-  const outcome = await runTestStage(adapter, project, spec, verification);
+  const outcome = await runTestStage(
+    adapter,
+    project,
+    spec,
+    verification,
+    coverageTarget,
+  );
   // Fuera del tiempo de generación, como la verificación; se guarda aparte
   // para medir cuánto cuesta ejecutar.
   saveAgentOutput(project.rootPath, "test-run", {
@@ -381,6 +422,138 @@ async function executeInPanel(
     command: "showTestRun",
     testRun: presentTestRun(outcome, spec.unitName),
   });
+
+  await measureInPanel(panel, ecosystem, project, spec, outcome, coverageTarget);
+}
+
+/**
+ * Mide la cobertura de la ejecución que acaba de terminar y la muestra
+ * debajo. Guarda el resultado en `AgentOutputs/coverage/` y, si se pudo
+ * medir, el informe HTML al lado; si no, borra el de una medición anterior
+ * para que el botón no abra números viejos.
+ */
+async function measureInPanel(
+  panel: vscode.WebviewPanel,
+  ecosystem: ActiveEcosystem,
+  project: ProjectModel,
+  spec: ArtifactSpec,
+  execution: TestRunOutcome,
+  coverageTarget: CoverageTarget,
+) {
+  const { adapter } = ecosystem;
+  coverageReportByPanel.delete(panel);
+  if (
+    supportsCoverage(adapter) &&
+    (execution.status === "passed" || execution.status === "failed")
+  ) {
+    panel.webview.postMessage({
+      command: "coverageRunning",
+      stageName: COVERAGE_STAGE_NAME,
+    });
+  }
+
+  const started = Date.now();
+  const outcome = await runCoverageStage(
+    adapter,
+    project,
+    execution,
+    coverageTarget,
+  );
+  const jsonPath = saveAgentOutput(project.rootPath, "coverage", {
+    ...outcome,
+    durationMs: Date.now() - started,
+  });
+
+  const reportPath = path.join(path.dirname(jsonPath), "coverage-report.html");
+  fs.rmSync(reportPath, { force: true });
+  let note: string | undefined;
+  if (outcome.status === "measured") {
+    try {
+      const document = await buildCoverageDocument(
+        project,
+        outcome,
+        coverageTarget,
+        spec.unitName,
+      );
+      const template = fs.readFileSync(COVERAGE_TEMPLATE, "utf8");
+      fs.writeFileSync(
+        reportPath,
+        renderCoverageDocument(template, document),
+        "utf8",
+      );
+      coverageReportByPanel.set(panel, {
+        path: reportPath,
+        title: document.title,
+      });
+    } catch (err: any) {
+      // La medición vale igual: el panel la muestra y el JSON quedó escrito.
+      note = `No se pudo escribir el informe HTML: ${err.message}`;
+    }
+  }
+
+  // Una pestaña abierta con la medición anterior se pone al día, o se cierra
+  // si esta no dejó informe: tampoco ahí quedan números viejos.
+  const tab = coverageTabByPanel.get(panel);
+  const report = coverageReportByPanel.get(panel);
+  if (tab && report) {
+    showCoverageReport(tab, report);
+  } else if (tab) {
+    coverageTabByPanel.delete(panel);
+    tab.dispose();
+  }
+
+  const presentation = presentCoverage(outcome, coverageTarget);
+  panel.webview.postMessage({
+    command: "showCoverage",
+    coverage: note ? { ...presentation, note } : presentation,
+    reportAvailable: !!report,
+  });
+}
+
+/**
+ * Abre el informe de cobertura del panel en una pestaña de VS Code, o trae al
+ * frente la que ya lo muestra. No va al navegador del sistema: Windows
+ * decodifica mal la URL de una ruta con tildes (`Andr%C3%A9s` como
+ * `AndrÃ©s`) y no encuentra el archivo.
+ */
+function openCoverageReport(panel: vscode.WebviewPanel) {
+  const report = coverageReportByPanel.get(panel);
+  if (!report || !fs.existsSync(report.path)) {
+    vscode.window.showWarningMessage(
+      "El informe de cobertura ya no está: volvé a intentar la ejecución.",
+    );
+    return;
+  }
+
+  let tab = coverageTabByPanel.get(panel);
+  if (tab) {
+    tab.reveal();
+  } else {
+    const created = vscode.window.createWebviewPanel(
+      "unityTestIACoverage",
+      report.title,
+      vscode.ViewColumn.Active,
+      // La plantilla trae todo adentro: no necesita leer archivos locales.
+      { enableScripts: true, localResourceRoots: [] },
+    );
+    created.onDidDispose(() => {
+      if (coverageTabByPanel.get(panel) === created) {
+        coverageTabByPanel.delete(panel);
+      }
+    });
+    coverageTabByPanel.set(panel, created);
+    tab = created;
+  }
+  showCoverageReport(tab, report);
+}
+
+/** Carga en la pestaña el informe tal como quedó escrito en disco. */
+function showCoverageReport(
+  tab: vscode.WebviewPanel,
+  report: { path: string; title: string },
+) {
+  tab.title = report.title;
+  tab.webview.html = fs.readFileSync(report.path, "utf8");
 }
 
 /** Solo la ejecución, con la última verificación del panel. */
@@ -401,6 +574,7 @@ async function executeAgainInPanel(
       testCtx.project,
       testCtx.spec,
       verification,
+      testCtx.coverageTarget,
     );
   } finally {
     verifyingPanels.delete(panel);
@@ -867,6 +1041,7 @@ async function handleGenerate(
       project,
       spec,
       profile,
+      coverageTarget: { filePath: targetLocation.filePath, unit: target },
     });
 
     const elapsedMs = Date.now() - generationStart;
@@ -1037,6 +1212,10 @@ export async function createWebviewPanel(
 
       case "runTestsAgain":
         await executeAgainInPanel(panel, ecosystem);
+        break;
+
+      case "openCoverageReport":
+        openCoverageReport(panel);
         break;
 
       case "chatMessage": {

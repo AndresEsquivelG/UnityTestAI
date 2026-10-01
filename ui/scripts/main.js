@@ -249,6 +249,7 @@ window.addEventListener("message", (event) => {
       clearAgentPipeline();
       hideVerification();
       hideVerification("testRunPanel");
+      hideVerification("coveragePanel");
       if (genTimeBadge) genTimeBadge.style.display = "none";
       if (genTokenBadge) genTokenBadge.style.display = "none";
       break;
@@ -304,12 +305,34 @@ window.addEventListener("message", (event) => {
     case "verificationRunning":
       showVerificationRunning(message.stageName);
       // Lo que se va a verificar es otra versión: la ejecución anterior ya no
-      // habla de ella.
+      // habla de ella, ni su cobertura.
       hideVerification("testRunPanel");
+      hideVerification("coveragePanel");
       break;
 
     case "testRunRunning":
       showVerificationRunning(message.stageName, "testRunPanel");
+      hideVerification("coveragePanel");
+      break;
+
+    case "coverageRunning":
+      showVerificationRunning(message.stageName, "coveragePanel");
+      break;
+
+    case "showCoverage":
+      // Sin reintento propio: los datos salen de la ejecución, y su
+      // reintento vuelve a medir.
+      showVerification(
+        message.coverage,
+        () => {},
+        "coveragePanel",
+        message.reportAvailable
+          ? {
+              label: "Abrir informe",
+              run: () => vscode.postMessage({ command: "openCoverageReport" }),
+            }
+          : undefined
+      );
       break;
 
     case "showTestRun":

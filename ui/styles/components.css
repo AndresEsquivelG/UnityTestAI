@@ -315,6 +315,7 @@
 .verification--passed { border-left-color: #4caf50; background: #1a2b1a; }
 .verification--failed { border-left-color: #f07178; background: #2a1a1a; }
 .verification--notRun { border-left-color: #ffcb6b; background: #2b261a; }
+.verification--measured { border-left-color: #82aaff; background: #1a1f2b; }
 
 .verification__header { font-weight: 600; color: #cdd6f4; }
 .verification__note { margin-top: 4px; color: #c792ea; }
@@ -354,5 +355,17 @@
 .verification__case--passed { color: #9ccc9c; }
 .verification__case--failed { color: #f07178; }
 .verification__case--skipped { color: #ffcb6b; }
+
+.verification__details {
+  margin-top: 6px;
+  padding-left: 10px;
+  border-left: 2px solid #333;
+}
+
+.verification__detail {
+  padding: 1px 0;
+  font-size: 11px;
+  color: #a6accd;
+}
 
 .verification__retry { margin-top: 8px; font-size: 11px; }

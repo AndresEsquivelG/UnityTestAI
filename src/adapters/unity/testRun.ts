@@ -2,6 +2,7 @@ import * as fsp from "fs/promises";
 import * as path from "path";
 import type {
   ArtifactSpec,
+  CoverageTarget,
   PreconditionViolation,
   ProjectModel,
   TestCaseOutcome,
@@ -17,6 +18,7 @@ import {
   runInBatch,
   type BatchActivity,
 } from "./batch";
+import { coverageArguments, coveragePackageVersion, pathFilterFor, readExecutionCoverage } from "./coverage";
 import { escapeForRegExp } from "./csharpSource";
 import type { EditorRunResult, UnityEditorToolchain } from "./editor";
 
@@ -37,6 +39,9 @@ import type { EditorRunResult, UnityEditorToolchain } from "./editor";
  *
  * `-runTests` cierra el editor al terminar: con `-quit` se cerraría antes de
  * ejecutar nada.
+ *
+ * Con un archivo que medir, la misma corrida pide la cobertura (ver
+ * `coverage.ts`). No se nota en el tiempo: 11 s con cobertura y 12 s sin.
  */
 
 const RUN_TESTS: BatchActivity = {
@@ -55,7 +60,8 @@ export interface TestRunOptions {
 export async function runUnityTests(
   project: ProjectModel,
   spec: ArtifactSpec,
-  options: TestRunOptions
+  options: TestRunOptions,
+  coverage?: CoverageTarget
 ): Promise<TestExecutionResult> {
   const { toolchain } = options;
 
@@ -65,6 +71,12 @@ export async function runUnityTests(
   }
 
   const platform = await testPlatform(project, spec);
+  // Sin el paquete, o con una ruta que no se puede filtrar, se ejecuta igual
+  // y sin medir: OP-15 explica después por qué no hay cobertura.
+  const pathFilter =
+    coverage && (await coveragePackageVersion(project)) ? pathFilterFor(coverage.filePath) : undefined;
+  const coverageDir = (workDir: string) => path.join(workDir, "coverage");
+
   return runInBatch(
     toolchain,
     editor.executable,
@@ -82,10 +94,18 @@ export async function runUnityTests(
       path.join(workDir, REPORT_FILE),
       "-logFile",
       logFile,
+      ...(pathFilter ? coverageArguments(coverageDir(workDir), pathFilter) : []),
     ],
     options.timeoutMs ?? BATCH_TIMEOUT_MS,
     async (run, log, workDir) =>
-      classifyTestRun(run, log, await readIfPresent(path.join(workDir, REPORT_FILE)), spec, platform)
+      classifyTestRun(
+        run,
+        log,
+        await readIfPresent(path.join(workDir, REPORT_FILE)),
+        spec,
+        platform,
+        pathFilter ? await readExecutionCoverage(coverageDir(workDir), log) : undefined
+      )
   );
 }
 
@@ -138,7 +158,8 @@ function classifyTestRun(
   log: string,
   report: string,
   spec: ArtifactSpec,
-  platform: string
+  platform: string,
+  rawCoverage: string | undefined
 ): TestExecutionResult {
   const blocker = batchBlocker(run, log, RUN_TESTS);
   if (blocker) {
@@ -192,6 +213,7 @@ function classifyTestRun(
     ...parsed,
     exitCode,
     rawReport: report,
+    ...(rawCoverage === undefined ? {} : { rawCoverage }),
   };
 }
 

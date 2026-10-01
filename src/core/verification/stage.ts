@@ -57,7 +57,8 @@ export interface PresentedDiagnostic {
 
 export interface VerificationPresentation {
   readonly stageName: string;
-  readonly status: VerificationOutcome["status"];
+  /** `measured` solo en la cobertura, que no aprueba ni reprueba. */
+  readonly status: VerificationOutcome["status"] | "measured";
   readonly summary: string;
   readonly remediation?: string;
   readonly diagnostics: readonly PresentedDiagnostic[];
@@ -76,6 +77,8 @@ export interface VerificationPresentation {
   readonly retryable?: boolean;
   /** Solo en la ejecución: cada prueba con su resultado. */
   readonly cases?: readonly PresentedTestCase[];
+  /** Solo en la cobertura: las demás cifras y las notas, una por renglón. */
+  readonly details?: readonly string[];
 }
 
 /** Una prueba de la ejecución, lista para mostrar. */

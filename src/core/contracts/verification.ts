@@ -15,13 +15,13 @@
  * y con los archivos estructurados que producen. Hasta entonces, este archivo
  * es el primero que debe revisarse ante cualquier discrepancia.
  *
- * `VerificationResult` y `TestExecutionResult` ya se contrastaron con una
- * herramienta real: Unity 2021.3 en modo batch. El de OP-15 sigue sin
- * contrastar.
+ * Los tres ya se contrastaron con una herramienta real: Unity 2021.3 en modo
+ * batch, con su paquete de cobertura para OP-15.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 import type { PreconditionViolation } from "./materialization";
+import type { UnitTarget } from "./target";
 
 export type DiagnosticSeverity = "error" | "warning";
 
@@ -159,6 +159,12 @@ interface TestRunCompleted {
   readonly exitCode: number;
   /** Informe crudo del ejecutor, conservado para diagnóstico y trazabilidad. */
   readonly rawReport: string;
+  /**
+   * Datos crudos de cobertura de esta misma corrida, cuando se pidieron y la
+   * herramienta los dejó. Solo los interpreta el adaptador que los produjo,
+   * en OP-15: medir en la misma corrida evita ejecutar las pruebas dos veces.
+   */
+  readonly rawCoverage?: string;
 }
 
 /** Corrieron y ninguna falló. Puede haber omitidas. */
@@ -170,6 +176,13 @@ export interface TestRunPassed extends TestRunCompleted {
 export interface TestRunFailed extends TestRunCompleted {
   readonly status: "failed";
 }
+
+/**
+ * Una corrida en la que las pruebas sí se ejecutaron, pasaran o no. Es lo
+ * único sobre lo que se puede medir cobertura: una prueba que falla también
+ * recorre código.
+ */
+export type CompletedTestRun = TestRunPassed | TestRunFailed;
 
 /**
  * No se llegó a ejecutar ninguna prueba: la herramienta no está, otro proceso
@@ -184,12 +197,48 @@ export interface TestRunNotRun {
   readonly rawOutput?: string;
 }
 
+/**
+ * Qué medir: el archivo y la unidad bajo prueba. La cobertura se limita a ese
+ * archivo porque es lo que la prueba generada promete probar; medir el
+ * proyecto entero daría un porcentaje bajísimo que no dice nada de la prueba.
+ */
+export interface CoverageTarget {
+  /** Archivo de la unidad bajo prueba, relativo a `ProjectModel.rootPath`. */
+  readonly filePath: string;
+  readonly unit: UnitTarget;
+}
+
 /** Porcentaje cubierto junto con los conteos que lo sustentan. */
 export interface CoverageMetric {
   readonly covered: number;
   readonly total: number;
-  /** Porcentaje en el intervalo [0, 100]. */
+  /** Porcentaje en el intervalo [0, 100]; 0 si no hay nada que cubrir. */
   readonly percentage: number;
+}
+
+/**
+ * Cómo quedó una línea con código medible: la ejecutó la corrida, no la
+ * ejecutó, o tiene varias partes medibles y la corrida ejecutó solo algunas.
+ */
+export type LineCoverageStatus = "covered" | "partial" | "missed";
+
+export interface LineCoverage {
+  /** Línea, base 1. */
+  readonly line: number;
+  readonly status: LineCoverageStatus;
+}
+
+/**
+ * Cobertura de un método o función del archivo. Reúne sus sobrecargas y el
+ * código que el compilador genera a partir de él (iteradores, funciones
+ * anónimas), porque en el archivo todo eso está escrito dentro del método.
+ */
+export interface UnitCoverage {
+  readonly name: string;
+  /** Primera línea con código medible, para ubicarlo en el archivo. */
+  readonly firstLine: number;
+  readonly line: CoverageMetric;
+  readonly decision?: CoverageMetric;
 }
 
 /** Cobertura de un archivo concreto. */
@@ -198,17 +247,61 @@ export interface FileCoverage {
   readonly filePath: string;
   readonly line: CoverageMetric;
   readonly decision?: CoverageMetric;
+  /** Cada método o función con código medible, en el orden del archivo. */
+  readonly units: readonly UnitCoverage[];
+  /** Solo las líneas con código medible, en orden. */
+  readonly lines: readonly LineCoverage[];
 }
 
 /**
  * OP-15 — Informe de cobertura, global y por archivo.
  *
- * La cobertura de decisión es opcional porque no todas las herramientas la
- * entregan, y algunas solo si se activa expresamente: el tipo tiene que admitir
- * un adaptador que entregue únicamente cobertura de línea.
+ * Contrastado con el paquete de cobertura de Unity. La cobertura de decisión
+ * es opcional porque no todas las herramientas la entregan (ese paquete no la
+ * mide), y algunas solo si se activa expresamente. Su ausencia quiere decir
+ * «no disponible», nunca cero.
  */
 export interface CoverageReport {
+  /**
+   * De todo lo medido, que es el archivo de `CoverageTarget`. Cuenta líneas
+   * del archivo, aunque la herramienta mida otra cosa: una línea con código
+   * medible cuenta una vez, y como cubierta si la corrida ejecutó algo de
+   * ella. Lo mismo en cada archivo y en cada unidad.
+   */
   readonly line: CoverageMetric;
   readonly decision?: CoverageMetric;
   readonly byFile: readonly FileCoverage[];
+  /**
+   * La unidad bajo prueba. Falta si la herramienta no encontró código
+   * medible con ese nombre en el archivo.
+   */
+  readonly target?: UnitCoverage;
+  /**
+   * Lo que hay que saber para leer los números, dicho por el adaptador: qué
+   * cuenta su herramienta como «línea» y por qué falta la decisión, si falta.
+   */
+  readonly notes?: readonly string[];
+}
+
+/**
+ * Resultado de OP-15. Son los estados de la ejecución sin el de «falló»: una
+ * medición no aprueba ni reprueba nada. Que no se haya podido medir se
+ * informa con su motivo y no como un 0 %, que se leería como una prueba que
+ * no recorre nada.
+ */
+export type CoverageResult = CoverageMeasured | CoverageNotRun;
+
+export interface CoverageMeasured extends CoverageReport {
+  readonly status: "measured";
+}
+
+/**
+ * No se pudo medir: falta la herramienta en el proyecto, la corrida no dejó
+ * datos, u otro proceso tenía el proyecto tomado.
+ */
+export interface CoverageNotRun {
+  readonly status: "notRun";
+  readonly blocker: PreconditionViolation;
+  /** Salida cruda, cuando la herramienta llegó a arrancar. */
+  readonly rawOutput?: string;
 }
