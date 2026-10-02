@@ -10,68 +10,19 @@ import {
   type LLMResult,
 } from "../llm";
 import type { ActiveEcosystem } from "../core/adapters";
+import { readArtifact } from "../core/project";
+import type { VerificationOutcome } from "../core/verification";
 import {
-  supportsCoverage,
-  supportsDependencyDetection,
-  supportsSchemaExtension,
-  supportsTestRun,
-  supportsVerification,
-} from "../core/contracts";
-import type {
-  ArtifactSpec,
-  CoverageTarget,
-  ProjectModel,
-  PromptProfile,
-  SymbolCandidate,
-  UnitTarget,
-} from "../core/contracts";
-import {
-  dependencyLabel,
-  describeViolations,
-  readArtifact,
-  renderProjectTree,
-  resolveDependencies,
-  writeArtifact,
-  type ResolvedDependency,
-} from "../core/project";
-import {
-  COVERAGE_STAGE_NAME,
-  TEST_RUN_STAGE_NAME,
-  buildCoverageDocument,
-  presentCoverage,
-  presentRepairProgress,
-  presentRepairResult,
-  presentTestRun,
-  renderCoverageDocument,
-  runCoverageStage,
-  runTestStage,
-  verificationStageName,
-  verifyAndRepair,
-  type RepairReply,
-  type RepairRequest,
-  type TestRunOutcome,
-  type VerificationOutcome,
-  type VerificationPresentation,
-} from "../core/verification";
-import { runMethodSlicer } from "../agents/methodSlicer";
-import { runDependencyResolver } from "../agents/dependencyResolver";
-import { runContextBuilder } from "../agents/contextBuilder";
-import { runContextValidator, runTestValidator } from "../agents/validator";
-import { runTestGenerator } from "../agents/testGenerator";
-import { runCodeAnalyzer } from "../agents/codeAnalyzer";
-import { formatCodeAnalysis } from "../agents/analysisText";
+  checkGeneratedTest,
+  generateTest,
+  runAndMeasure,
+  type CheckStage,
+  type EditorSelection,
+  type GeneratedTest,
+  type PipelineEvent,
+} from "../pipeline";
 import { runChatFixer } from "../agents/chatFixer";
 import { saveAgentOutput } from "../agents/agentOutputSaver";
-
-// ── Editor input ───────────────────────────────────────────────────────────────
-
-/** Archivo abierto con el que se invocó el comando. */
-export interface EditorSelection {
-  /** Texto del archivo tal como está en el editor, con cambios sin guardar. */
-  readonly code: string;
-  /** Ruta absoluta del archivo abierto. */
-  readonly path: string;
-}
 
 // ── Per-panel state ────────────────────────────────────────────────────────────
 
@@ -87,20 +38,8 @@ const generationMetaByPanel = new WeakMap<
   }
 >();
 
-type TestContext = {
-  testCode: string;
-  assembledContext: string;
-  savedPath: string;
-  /** Modelo de la corrida, para volver a verificar el artefacto (OP-13). */
-  project: ProjectModel;
-  /** Especificación con la que se escribió, para volver a normalizar (OP-11). */
-  spec: ArtifactSpec;
-  /** Perfil de la corrida, para que el corrector componga el mismo prompt. */
-  profile: PromptProfile;
-  /** Archivo y unidad bajo prueba, sobre los que se mide la cobertura (OP-15). */
-  coverageTarget: CoverageTarget;
-};
-const testContextByPanel = new WeakMap<vscode.WebviewPanel, TestContext>();
+/** Lo que dejó la última generación de cada panel, para verificar y corregir. */
+const testContextByPanel = new WeakMap<vscode.WebviewPanel, GeneratedTest>();
 
 /**
  * Plantilla del informe de cobertura. Empaquetado, este módulo queda en
@@ -217,14 +156,10 @@ async function askInChat(
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 /**
- * Verifica el artefacto que ya está en disco (OP-13) y, mientras la
- * verificación lo rechace con errores dentro de la prueba, se los pasa al
- * corrector y vuelve a verificar. Cada paso se muestra debajo de la prueba.
- *
- * Corre después de mostrar la prueba y no antes: la verificación puede tardar
- * segundos o minutos, y la prueba ya está escrita y se puede leer mientras
- * tanto. Si el adaptador no ofrece verificación, la etapa se informa como no
- * aplicable sin lanzar nada.
+ * Verifica la prueba del panel, la corrige si hace falta, la ejecuta y mide su
+ * cobertura (ver `checkGeneratedTest`). Mientras tanto el panel queda ocupado:
+ * el corrector del chat o una generación nueva pisarían el archivo a mitad del
+ * ciclo.
  */
 async function verifyInPanel(
   panel: vscode.WebviewPanel,
@@ -237,277 +172,115 @@ async function verifyInPanel(
     return;
   }
   verifyingPanels.add(panel);
-
-  const { adapter } = ecosystem;
-  const kind = adapter.capabilities.verification;
-  const { project, spec } = testCtx;
-  const outputRoot = project.rootPath;
   const subModel = meta.subModel ?? undefined;
-  const showVerification = (verification: VerificationPresentation) =>
-    panel.webview.postMessage({ command: "showVerification", verification });
-
-  const fix = async ({
-    cycle,
-    code,
-    feedback,
-  }: RepairRequest): Promise<RepairReply> => {
-    const before = tokenTotals(panel);
-    const fixResult = await runChatFixer(
-      {
-        profile: testCtx.profile,
-        testCode: code,
-        assembledContext: testCtx.assembledContext,
-        userMessage: feedback,
-        className: meta.className,
-        methodName: meta.methodName,
-        workspaceRoot: outputRoot,
-        dumpDir: path.join("repair", `cycle-${cycle}`),
-      },
-      (prompt) => askOnce(provider, prompt, panel, subModel),
-    );
-    const after = tokenTotals(panel);
-    const usage = {
-      inputTokens: after.inputTokens - before.inputTokens,
-      outputTokens: after.outputTokens - before.outputTokens,
-    };
-
-    switch (fixResult.status) {
-      case "FIXED":
-        return {
-          status: "fixed",
-          code: fixResult.correctedCode,
-          summary: fixResult.summary,
-          usage,
-        };
-      case "INFO":
-        return {
-          status: "notFixed",
-          reason: `respondió sin corregir: ${fixResult.answer}`,
-          usage,
-        };
-      case "ERROR":
-        return { status: "notFixed", reason: fixResult.message, usage };
-    }
-  };
 
   try {
-    // Los volcados son de la última verificación, igual que los de los
-    // agentes: sin borrar, un ciclo de una corrida anterior quedaría mezclado.
-    // Dentro del try: si el borrado fallara afuera, el panel quedaría marcado
-    // como ocupado para siempre.
-    fs.rmSync(path.join(outputRoot, "AgentOutputs", "repair"), {
-      recursive: true,
-      force: true,
-    });
-
-    const result = await verifyAndRepair({
-      adapter,
-      project,
-      spec,
-      fix,
-      onEvent: (event) => {
-        const fixerAgent = `Auto Fixer #${event.cycle}`;
-        switch (event.kind) {
-          case "verifying":
-            if (supportsVerification(adapter)) {
-              panel.webview.postMessage({
-                command: "verificationRunning",
-                stageName: verificationStageName(kind),
-              });
-            }
-            break;
-          case "fixing":
-            showVerification(
-              presentRepairProgress(
-                kind,
-                event.outcome,
-                event.cycle,
-                event.maxCycles,
-              ),
-            );
-            notifyAgent(panel, fixerAgent, "running");
-            break;
-          case "fixed":
-            testContextByPanel.set(panel, { ...testCtx, testCode: event.code });
-            notifyAgent(
-              panel,
-              fixerAgent,
-              "done",
-              event.summary ?? "Correcciones aplicadas",
-            );
-            panel.webview.postMessage({
-              command: "updateResult",
-              result: event.code,
-            });
-            break;
-          case "notFixed":
-            notifyAgent(panel, fixerAgent, "error", event.reason);
-            break;
-        }
-      },
-    });
-
-    const { outcome, ...record } = result;
-    saveAgentOutput(outputRoot, "verification", outcome);
-    saveAgentOutput(outputRoot, "repair", {
-      ...record,
-      finalStatus: outcome.status,
-    });
-    showVerification(presentRepairResult(kind, result));
-    verificationStatusByPanel.set(panel, outcome.status);
-
-    // ── OP-14 y OP-15: ejecución y cobertura, con la prueba ya verificada ──
-    await executeInPanel(
-      panel,
-      ecosystem,
-      project,
-      spec,
-      outcome.status,
-      testCtx.coverageTarget,
-    );
-  } catch (err: any) {
-    // La prueba ya está escrita: un fallo aquí no invalida la generación.
-    showVerification({
-      stageName: verificationStageName(kind),
-      status: "notRun",
-      summary: `La verificación se interrumpió: ${err.message}`,
-      remediation: "Volvé a intentar la verificación.",
-      diagnostics: [],
+    await checkGeneratedTest({
+      adapter: ecosystem.adapter,
+      test: testCtx,
+      className: meta.className,
+      methodName: meta.methodName,
+      ask: (prompt) => askOnce(provider, prompt, panel, subModel),
+      tokenTotals: () => tokenTotals(panel),
+      coverageTemplate: COVERAGE_TEMPLATE,
+      onEvent: (event) => showPipelineEvent(panel, event),
     });
   } finally {
     verifyingPanels.delete(panel);
   }
 }
 
-/**
- * Ejecuta las pruebas del artefacto (OP-14) y muestra los contadores debajo
- * de la verificación; después mide la cobertura con los datos de esa misma
- * corrida (OP-15). Quien llama tiene que haber marcado el panel como
- * ocupado: la ejecución abre el mismo proyecto que la verificación.
- */
-async function executeInPanel(
-  panel: vscode.WebviewPanel,
-  ecosystem: ActiveEcosystem,
-  project: ProjectModel,
-  spec: ArtifactSpec,
-  verification: VerificationOutcome["status"],
-  coverageTarget: CoverageTarget,
-) {
-  const { adapter } = ecosystem;
-  const willRun =
-    supportsTestRun(adapter) &&
-    (verification === "passed" || verification === "notApplicable");
-  if (willRun) {
-    panel.webview.postMessage({
-      command: "testRunRunning",
-      stageName: TEST_RUN_STAGE_NAME,
-    });
-  }
-
-  const started = Date.now();
-  const outcome = await runTestStage(
-    adapter,
-    project,
-    spec,
-    verification,
-    coverageTarget,
-  );
-  // Fuera del tiempo de generación, como la verificación; se guarda aparte
-  // para medir cuánto cuesta ejecutar.
-  saveAgentOutput(project.rootPath, "test-run", {
-    ...outcome,
-    durationMs: Date.now() - started,
-  });
-  panel.webview.postMessage({
-    command: "showTestRun",
-    testRun: presentTestRun(outcome, spec.unitName),
-  });
-
-  await measureInPanel(panel, ecosystem, project, spec, outcome, coverageTarget);
-}
+/** Mensaje con el que la interfaz muestra que una etapa está corriendo. */
+const RUNNING_COMMAND: Record<CheckStage, string> = {
+  verification: "verificationRunning",
+  testRun: "testRunRunning",
+  coverage: "coverageRunning",
+};
 
 /**
- * Mide la cobertura de la ejecución que acaba de terminar y la muestra
- * debajo. Guarda el resultado en `AgentOutputs/coverage/` y, si se pudo
- * medir, el informe HTML al lado; si no, borra el de una medición anterior
- * para que el botón no abra números viejos.
+ * Muestra en el panel un aviso del pipeline, con el mensaje que la interfaz ya
+ * sabe mostrar, y guarda lo que el panel necesita después: la prueba
+ * corregida, el estado de la verificación y el informe de cobertura.
  */
-async function measureInPanel(
-  panel: vscode.WebviewPanel,
-  ecosystem: ActiveEcosystem,
-  project: ProjectModel,
-  spec: ArtifactSpec,
-  execution: TestRunOutcome,
-  coverageTarget: CoverageTarget,
-) {
-  const { adapter } = ecosystem;
-  coverageReportByPanel.delete(panel);
-  if (
-    supportsCoverage(adapter) &&
-    (execution.status === "passed" || execution.status === "failed")
-  ) {
-    panel.webview.postMessage({
-      command: "coverageRunning",
-      stageName: COVERAGE_STAGE_NAME,
-    });
-  }
+function showPipelineEvent(panel: vscode.WebviewPanel, event: PipelineEvent) {
+  switch (event.kind) {
+    case "generationStarted":
+      panel.webview.postMessage({ command: "clearPipeline" });
+      break;
 
-  const started = Date.now();
-  const outcome = await runCoverageStage(
-    adapter,
-    project,
-    execution,
-    coverageTarget,
-  );
-  const jsonPath = saveAgentOutput(project.rootPath, "coverage", {
-    ...outcome,
-    durationMs: Date.now() - started,
-  });
+    case "agent":
+      notifyAgent(panel, event.agent, event.status, event.detail);
+      break;
 
-  const reportPath = path.join(path.dirname(jsonPath), "coverage-report.html");
-  fs.rmSync(reportPath, { force: true });
-  let note: string | undefined;
-  if (outcome.status === "measured") {
-    try {
-      const document = await buildCoverageDocument(
-        project,
-        outcome,
-        coverageTarget,
-        spec.unitName,
-      );
-      const template = fs.readFileSync(COVERAGE_TEMPLATE, "utf8");
-      fs.writeFileSync(
-        reportPath,
-        renderCoverageDocument(template, document),
-        "utf8",
-      );
-      coverageReportByPanel.set(panel, {
-        path: reportPath,
-        title: document.title,
+    case "dependencyFiles":
+      panel.webview.postMessage({ command: "dependencyFiles", files: event.files });
+      break;
+
+    case "contextSlices":
+      panel.webview.postMessage({
+        command: "contextBuilderSlices",
+        slices: event.slices,
       });
-    } catch (err: any) {
-      // La medición vale igual: el panel la muestra y el JSON quedó escrito.
-      note = `No se pudo escribir el informe HTML: ${err.message}`;
+      break;
+
+    case "stageRunning":
+      panel.webview.postMessage({
+        command: RUNNING_COMMAND[event.stage],
+        stageName: event.stageName,
+      });
+      break;
+
+    case "verification":
+      panel.webview.postMessage({
+        command: "showVerification",
+        verification: event.presentation,
+      });
+      break;
+
+    case "verified":
+      verificationStatusByPanel.set(panel, event.status);
+      break;
+
+    case "testCodeUpdated": {
+      const testCtx = testContextByPanel.get(panel);
+      if (testCtx) {
+        testContextByPanel.set(panel, { ...testCtx, testCode: event.code });
+      }
+      panel.webview.postMessage({ command: "updateResult", result: event.code });
+      break;
+    }
+
+    case "testRun":
+      panel.webview.postMessage({ command: "showTestRun", testRun: event.presentation });
+      // La medición que sigue reemplaza al informe anterior: mientras corre,
+      // el botón no tiene que abrir números viejos.
+      coverageReportByPanel.delete(panel);
+      break;
+
+    case "coverage": {
+      if (event.report) {
+        coverageReportByPanel.set(panel, event.report);
+      }
+
+      // Una pestaña abierta con la medición anterior se pone al día, o se cierra
+      // si esta no dejó informe: tampoco ahí quedan números viejos.
+      const tab = coverageTabByPanel.get(panel);
+      const report = coverageReportByPanel.get(panel);
+      if (tab && report) {
+        showCoverageReport(tab, report);
+      } else if (tab) {
+        coverageTabByPanel.delete(panel);
+        tab.dispose();
+      }
+
+      panel.webview.postMessage({
+        command: "showCoverage",
+        coverage: event.presentation,
+        reportAvailable: !!report,
+      });
+      break;
     }
   }
-
-  // Una pestaña abierta con la medición anterior se pone al día, o se cierra
-  // si esta no dejó informe: tampoco ahí quedan números viejos.
-  const tab = coverageTabByPanel.get(panel);
-  const report = coverageReportByPanel.get(panel);
-  if (tab && report) {
-    showCoverageReport(tab, report);
-  } else if (tab) {
-    coverageTabByPanel.delete(panel);
-    tab.dispose();
-  }
-
-  const presentation = presentCoverage(outcome, coverageTarget);
-  panel.webview.postMessage({
-    command: "showCoverage",
-    coverage: note ? { ...presentation, note } : presentation,
-    reportAvailable: !!report,
-  });
 }
 
 /**
@@ -568,14 +341,15 @@ async function executeAgainInPanel(
   }
   verifyingPanels.add(panel);
   try {
-    await executeInPanel(
-      panel,
-      ecosystem,
-      testCtx.project,
-      testCtx.spec,
+    await runAndMeasure({
+      adapter: ecosystem.adapter,
+      project: testCtx.project,
+      spec: testCtx.spec,
       verification,
-      testCtx.coverageTarget,
-    );
+      coverageTarget: testCtx.coverageTarget,
+      coverageTemplate: COVERAGE_TEMPLATE,
+      onEvent: (event) => showPipelineEvent(panel, event),
+    });
   } finally {
     verifyingPanels.delete(panel);
   }
@@ -590,75 +364,13 @@ function notifyAgent(
   panel.webview.postMessage({ command: "agentStatus", agent, status, detail });
 }
 
-/**
- * Compara dos rutas absolutas del mismo sistema de archivos.
- *
- * En Windows y macOS el nombre no distingue mayúsculas, y la ruta que entrega el
- * editor puede diferir en la letra de unidad de la que se compone aquí. Un
- * empate de más solo haría usar el texto del editor en lugar del disco; un
- * empate de menos, al contrario.
- */
-function samePath(a: string, b: string): boolean {
-  const left = path.resolve(a);
-  const right = path.resolve(b);
-  if (process.platform === "win32" || process.platform === "darwin") {
-    return left.toLowerCase() === right.toLowerCase();
-  }
-  return left === right;
-}
-
-/** Detalle de un validador que encontró problemas y no trajo corrección. */
-function unfixedIssues(issues: readonly string[]): string {
-  return `${issues.length} problema(s) sin corregir: ${issues.join(" | ")}`;
-}
-
-function buildFullContext(
-  className: string,
-  methodName: string,
-  targetCode: string,
-  dependencyFiles: readonly ResolvedDependency[],
-): string {
-  const header = `// ── TARGET: ${className}.${methodName} ──────────────────────────────────────`;
-  const parts = [header, targetCode];
-
-  for (const dep of dependencyFiles) {
-    if (!dep.found || !dep.content) continue;
-    parts.push(
-      `// ── DEPENDENCY: ${dependencyLabel(dep)} ──────────────────────────────────────`,
-      dep.content,
-    );
-  }
-
-  return parts.join("\n\n");
-}
-
-/**
- * Código de la unidad bajo prueba.
- *
- * Sale de OP-06 y no del editor, porque la declaración que localizó OP-05 no
- * siempre está en el archivo abierto: antes, pedir una clase declarada en otro
- * archivo fallaba de entrada. Cuando sí coincide con el archivo abierto se usa
- * el texto del editor, que incluye los cambios todavía sin guardar.
- */
-async function readTargetCode(
-  ecosystem: ActiveEcosystem,
-  project: ProjectModel,
-  editor: EditorSelection,
-  location: SymbolCandidate,
-): Promise<string> {
-  const declaredIn = path.join(
-    project.rootPath,
-    ...location.filePath.split("/"),
-  );
-  if (samePath(declaredIn, editor.path)) {
-    return editor.code;
-  }
-  const source = await ecosystem.adapter.readSource(project, location);
-  return source.content;
-}
-
 // ── Pipeline ───────────────────────────────────────────────────────────────────
 
+/**
+ * Genera la prueba desde el panel. La secuencia está en `src/pipeline/`; aquí
+ * queda lo que es del panel: el bloqueo mientras se verifica, el modelo
+ * elegido, el tiempo y los tokens, y cómo se muestra cada paso.
+ */
 async function handleGenerate(
   className: string,
   methodName: string,
@@ -682,367 +394,24 @@ async function handleGenerate(
   const generationStart = Date.now();
   tokenTotalsByPanel.set(panel, { inputTokens: 0, outputTokens: 0 });
 
-  const { adapter } = ecosystem;
-
   try {
-    // ── OP-04: modelo del proyecto ───────────────────────────────────────────
-    // Se reconstruye en cada corrida a propósito: un archivo agregado desde que
-    // se abrió el panel tiene que entrar en el árbol y en la localización.
-    const project = await adapter.buildProjectModel(ecosystem.rootPath);
-    const projectTree = renderProjectTree(project);
-
-    // Los volcados van a la raíz del proyecto y no a la carpeta abierta, para
-    // que no se partan en dos cuando se abre una subcarpeta. Los agentes siguen
-    // llamando a este valor `workspaceRoot`; el nombre se corrige cuando se les
-    // extraigan las plantillas.
-    const outputRoot = project.rootPath;
-
-    panel.webview.postMessage({ command: "clearPipeline" });
-
     const provider = modelProviders[model];
     if (!provider) throw new Error(`Modelo no válido: ${model}`);
-    const ask = (prompt: string) =>
-      askOnce(provider, prompt, panel, subModel ?? undefined);
 
-    // ── OP-05: localización de la unidad bajo prueba ─────────────────────────
-    const target: UnitTarget = { className, methodName };
-    const location = await adapter.locateSymbol(project, target);
-    if (!location.found) {
-      throw new Error(location.reason);
-    }
-    // Ante sobrecargas se toma la primera; elegir entre las firmas es trabajo
-    // de la interfaz y todavía no hay dónde preguntarlo.
-    const [targetLocation] = location.candidates;
-
-    // ── OP-10 y OP-12: destino y precondiciones ──────────────────────────────
-    // Se comprueban antes de la primera llamada al modelo. Antes se comprobaba
-    // al final, después de pagar el pipeline completo, para descubrir entonces
-    // que no había dónde escribir el archivo.
-    const spec = adapter.specifyArtifact({
-      project,
-      target,
-      targetLocation,
+    const test = await generateTest({
+      adapter: ecosystem.adapter,
+      rootPath: ecosystem.rootPath,
+      className,
+      methodName,
       modelId: model,
-    });
-    const violations = await adapter.checkPreconditions(project, spec);
-    if (violations.length > 0) {
-      throw new Error(describeViolations(violations));
-    }
-
-    // ── OP-06: código de la unidad ───────────────────────────────────────────
-    const targetCode = await readTargetCode(
-      ecosystem,
-      project,
+      reduceContext,
       editor,
-      targetLocation,
-    );
-
-    // ── OP-08: perfil con el que se componen las plantillas neutras ──────────
-    // Se pide una sola vez por corrida: depende del proyecto descubierto y ese
-    // no cambia a mitad del pipeline.
-    const profile = adapter.getPromptProfile(project);
-
-    // ── OP-09: extensión del esquema de análisis, si el adaptador la ofrece ──
-    // Se pregunta por la capacidad declarada, nunca por el identificador del
-    // ecosistema. Un adaptador que no la declare recorre el mismo camino con la
-    // extensión ausente, sin ninguna condición más.
-    const analysisSchema = supportsSchemaExtension(adapter)
-      ? adapter.extendAnalysisSchema()
-      : undefined;
-
-    // ── Step 0: Method Slicer ──────────────────────────────────────────────
-    let codeSlice: string;
-    if (reduceContext) {
-      const slicerAgent = "Method Slicer";
-      notifyAgent(panel, slicerAgent, "running");
-      const slicerResult = await runMethodSlicer(
-        {
-          profile,
-          code: targetCode,
-          className,
-          methodName,
-          workspaceRoot: outputRoot,
-        },
-        ask,
-      );
-      saveAgentOutput(outputRoot, "method-slicer", slicerResult);
-
-      if (slicerResult.status === "ERROR") {
-        notifyAgent(panel, slicerAgent, "error", slicerResult.message);
-        throw new Error(`Method Slicer failed: ${slicerResult.message}`);
-      }
-      notifyAgent(panel, slicerAgent, "done");
-
-      codeSlice = slicerResult.codeSlice.join("\n");
-    } else {
-      codeSlice = targetCode;
-    }
-
-    // ── Step 1: Dependency Resolver ──────────────────────────────────────────
-    const depAgent = "Dependency Resolver";
-    notifyAgent(panel, depAgent, "running");
-    const depResult = await runDependencyResolver(
-      {
-        profile,
-        codeSlice,
-        projectTree,
-        className,
-        methodName,
-        workspaceRoot: outputRoot,
-      },
-      ask,
-    );
-    saveAgentOutput(outputRoot, "dependency-resolver", depResult);
-
-    if (depResult.status === "ERROR") {
-      notifyAgent(panel, depAgent, "error", depResult.message);
-      throw new Error(`Dependency Resolver failed: ${depResult.message}`);
-    }
-    notifyAgent(panel, depAgent, "done");
-
-    // ── OP-17 y OP-07: dependencias pedidas y detectadas ─────────────────────
-    // El agente decide qué pedir y a veces omite un tipo del proyecto que el
-    // código usa. Si el adaptador sabe detectarlos, se suman a lo pedido; si
-    // no, queda solo lo que pidió el agente, sin ninguna condición más.
-    const depReferences: string[] =
-      depResult.status === "MISSING_DEPENDENCIES" ? depResult.files : [];
-
-    let detectedReferences: readonly string[] = [];
-    let detectionError: string | undefined;
-    if (supportsDependencyDetection(adapter)) {
-      try {
-        // Sin recorte, `codeSlice` es el archivo entero: el foco limita la
-        // detección al método, como se le pide al agente.
-        detectedReferences = await adapter.detectDependencies(
-          project,
-          codeSlice,
-          reduceContext ? undefined : target,
-        );
-      } catch (err: any) {
-        // Complementa al agente: si falla, se sigue con lo que él pidió.
-        detectionError = err.message;
-      }
-    }
-
-    const dependencies = await resolveDependencies(
-      adapter,
-      project,
-      depReferences,
-      detectedReferences,
-    );
-    saveAgentOutput(outputRoot, "dependencies", {
-      requested: depReferences,
-      detected: detectedReferences,
-      ...(detectionError === undefined ? {} : { detectionError }),
-      files: dependencies.files.map(({ content, ...file }) => file),
+      ask: (prompt) => askOnce(provider, prompt, panel, subModel ?? undefined),
+      onEvent: (event) => showPipelineEvent(panel, event),
     });
-
-    if (dependencies.files.length > 0) {
-      panel.webview.postMessage({
-        command: "dependencyFiles",
-        files: dependencies.files.map((f) => ({
-          path: dependencyLabel(f),
-          found: f.found,
-          detected: f.detected,
-        })),
-      });
-    }
-
-    // Solo las que se encontraron: con una referencia que no existe, el
-    // constructor de contexto gastaría una llamada sin nada que recortar.
-    const dependencyFiles = dependencies.files
-      .filter((f) => f.found)
-      .map(dependencyLabel);
-
-    // ── Step 2: Context Builder ───────────────────────────────────────────────
-    let preValidationContext: string;
-    if (reduceContext) {
-      const ctxAgent = "Context Builder";
-      notifyAgent(panel, ctxAgent, "running");
-      const ctxResult = await runContextBuilder(
-        {
-          profile,
-          codeSlice,
-          dependencyFiles,
-          resolvedDependencyCode: dependencies.code,
-          className,
-          methodName,
-          workspaceRoot: outputRoot,
-        },
-        ask,
-      );
-      saveAgentOutput(outputRoot, "context-builder", ctxResult);
-
-      if (ctxResult.status === "ERROR") {
-        notifyAgent(panel, ctxAgent, "error", ctxResult.message);
-        throw new Error(`Context Builder failed: ${ctxResult.message}`);
-      }
-      notifyAgent(panel, ctxAgent, "done");
-
-      if (ctxResult.dependencySlices.length > 0) {
-        panel.webview.postMessage({
-          command: "contextBuilderSlices",
-          slices: ctxResult.dependencySlices.map((s) => ({
-            filePath: s.filePath,
-          })),
-        });
-      }
-
-      preValidationContext = ctxResult.assembledContext;
-    } else {
-      preValidationContext = buildFullContext(
-        className,
-        methodName,
-        targetCode,
-        dependencies.files,
-      );
-    }
-
-    // ── Step 2.5: Context Validator ───────────────────────────────────────────
-    const ctxValAgent = "Context Validator";
-    notifyAgent(panel, ctxValAgent, "running");
-    const ctxValResult = await runContextValidator(
-      {
-        profile,
-        assembledContext: preValidationContext,
-        className,
-        methodName,
-        workspaceRoot: outputRoot,
-        fullContext: !reduceContext,
-      },
-      ask,
-    );
-    saveAgentOutput(outputRoot, "validator-context", ctxValResult);
-
-    if (ctxValResult.status === "ERROR") {
-      notifyAgent(panel, ctxValAgent, "error", ctxValResult.message);
-      throw new Error(`Context Validator failed: ${ctxValResult.message}`);
-    }
-    if (ctxValResult.status === "UNFIXED") {
-      // Falla blanda: se sigue con el contexto tal cual. Cortar aquí tiraría
-      // las llamadas ya pagadas por algo que el validador no puede arreglar,
-      // y los problemas quedan a la vista.
-      notifyAgent(panel, ctxValAgent, "error", unfixedIssues(ctxValResult.issues));
-    } else {
-      notifyAgent(
-        panel,
-        ctxValAgent,
-        "done",
-        ctxValResult.status === "FIXED"
-          ? `Corregidos ${ctxValResult.issues.length} problema(s)`
-          : undefined,
-      );
-    }
-
-    const assembledContext = ctxValResult.output;
-
-    // ── Step 2.7: Code Analyzer ───────────────────────────────────────────────
-    const codeAnalyzerAgent = "Code Analyzer";
-    notifyAgent(panel, codeAnalyzerAgent, "running");
-    const codeAnalyzerResult = await runCodeAnalyzer(
-      {
-        profile,
-        schemaFields: analysisSchema?.fields,
-        assembledContext,
-        className,
-        methodName,
-        workspaceRoot: outputRoot,
-      },
-      ask,
-    );
-    saveAgentOutput(outputRoot, "code-analyzer", codeAnalyzerResult);
-
-    // Soft failure: log and continue without the pre-computed analysis
-    const codeAnalysis =
-      codeAnalyzerResult.status === "READY"
-        ? formatCodeAnalysis(codeAnalyzerResult, analysisSchema?.format)
-        : undefined;
-
-    notifyAgent(
-      panel,
-      codeAnalyzerAgent,
-      codeAnalyzerResult.status === "READY" ? "done" : "error",
-      codeAnalyzerResult.status === "ERROR"
-        ? codeAnalyzerResult.message
-        : undefined,
-    );
-
-    // ── Step 3: Test Generator ────────────────────────────────────────────────
-    const testAgent = "Test Generator";
-    notifyAgent(panel, testAgent, "running");
-    const testResult = await runTestGenerator(
-      {
-        profile,
-        assembledContext,
-        codeAnalysis,
-        className,
-        methodName,
-        workspaceRoot: outputRoot,
-      },
-      ask,
-    );
-    saveAgentOutput(outputRoot, "test-generator", testResult);
-
-    if (testResult.status === "ERROR") {
-      notifyAgent(panel, testAgent, "error", testResult.message);
-      throw new Error(`Test Generator failed: ${testResult.message}`);
-    }
-    notifyAgent(panel, testAgent, "done");
-
-    // ── OP-11: normalización y escritura del artefacto ───────────────────────
-    let finalTestCode = adapter.normalizeGeneratedCode(
-      testResult.testCode,
-      spec,
-    );
-    const savedPath = await writeArtifact(project, spec, finalTestCode);
-
-    // ── Step 3.5: Test Validator ──────────────────────────────────────────────
-    const testValAgent = "Test Validator";
-    notifyAgent(panel, testValAgent, "running");
-    const testValResult = await runTestValidator(
-      {
-        profile,
-        testCode: finalTestCode,
-        assembledContext,
-        className,
-        methodName,
-        workspaceRoot: outputRoot,
-      },
-      ask,
-    );
-    saveAgentOutput(outputRoot, "validator-test", testValResult);
-
-    if (testValResult.status === "ERROR") {
-      // Soft failure: surface the error but keep the original generated code
-      notifyAgent(panel, testValAgent, "error", testValResult.message);
-    } else if (testValResult.status === "UNFIXED") {
-      notifyAgent(panel, testValAgent, "error", unfixedIssues(testValResult.issues));
-    } else if (testValResult.status === "FIXED") {
-      finalTestCode = adapter.normalizeGeneratedCode(
-        testValResult.output,
-        spec,
-      );
-      await writeArtifact(project, spec, finalTestCode);
-      notifyAgent(
-        panel,
-        testValAgent,
-        "done",
-        `Corregidos ${testValResult.issues.length} problema(s)`,
-      );
-    } else {
-      notifyAgent(panel, testValAgent, "done");
-    }
 
     // Store test context for ChatFixer
-    testContextByPanel.set(panel, {
-      testCode: finalTestCode,
-      assembledContext,
-      savedPath,
-      project,
-      spec,
-      profile,
-      coverageTarget: { filePath: targetLocation.filePath, unit: target },
-    });
+    testContextByPanel.set(panel, test);
 
     const elapsedMs = Date.now() - generationStart;
     const tokens = tokenTotalsByPanel.get(panel) ?? {
@@ -1052,7 +421,7 @@ async function handleGenerate(
     const totalTokens = tokens.inputTokens + tokens.outputTokens;
     panel.webview.postMessage({
       command: "showResult",
-      result: finalTestCode,
+      result: test.testCode,
       elapsedMs,
       totalTokens,
     });

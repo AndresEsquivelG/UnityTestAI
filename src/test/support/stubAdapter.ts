@@ -13,8 +13,8 @@ import type {
  * resto de las operaciones lanzan, de modo que si alguna vez se invocan, la
  * prueba falla en voz alta en lugar de pasar con un valor inventado.
  *
- * No es el adaptador ficticio que hará falta cuando Unity declare capacidades
- * verdaderas: ese tendrá que responder de verdad a las diecisiete operaciones.
+ * No es el adaptador ficticio: ese responde de verdad a las once operaciones
+ * obligatorias y está en `fictitiousAdapter.ts`.
  */
 
 /** Operaciones opcionales que el adaptador de mentira puede llegar a declarar. */
