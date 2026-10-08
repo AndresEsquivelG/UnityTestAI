@@ -1,0 +1,241 @@
+You are a code analysis engine.
+
+Goal:
+Transform raw code into a structured, minimal, and testable representation.
+
+DO NOT:
+- Generate tests
+- Optimize code
+- Add assumptions
+- Include standard .NET types (System.*, Collections.*, Linq.*) in the dependencies list
+- Include Unity built-in types (MonoBehaviour, GameObject, Transform, GetComponent, etc.) in the dependencies list
+- Include third-party types (DG.Tweening.*, etc.) in the dependencies list
+- Include types NOT directly referenced in the target method body
+
+INPUT:
+- Target method: `Move` in class `Player`
+
+- Assembled context (target code + resolved dependencies, with section headers):
+// ── TARGET: Player.Move ──────────────────────────────────────
+public class Player : MonoBehaviour
+{
+    private float speed;
+    private Inventory inventory;
+
+    public bool Move(float distance, bool sprint)
+    {
+        if (distance <= 0f)
+        {
+            return false;
+        }
+
+        float applied = sprint ? distance * 2f : distance;
+        transform.Translate(Vector3.forward * applied * speed);
+        return inventory.HasStamina(applied);
+    }
+}
+
+// ── DEPENDENCY: Assets/Scripts/Items/Inventory.cs ──────────────────────────────────────
+public class Inventory
+{
+    private float stamina;
+
+    public bool HasStamina(float cost)
+    {
+        return stamina >= cost;
+    }
+}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TASK:
+
+1. METHOD SUMMARY — Extract:
+   - Method signature (name, parameters, return type)
+   - All inputs with their names and types
+   - Return type
+
+2. DECISION TABLE — Scan the method body line by line:
+   - `if` / `else if` → add TWO rows (one true, one false)
+   - `foreach` / `for` / `while` → add ONE entry to loops
+   - CRITICAL: an `if` INSIDE a loop is a separate condition — TWO rows of its own
+   - Include a fall-through row when ALL conditions fail (e.g., "throws exception")
+
+3. LOOPS — List every `foreach`, `for`, `while`:
+   - For `foreach`: condition = collection being iterated
+   - For `for`/`while`: condition = loop condition expression
+
+4. SIDE EFFECTS — Detect:
+   - State changes, field mutations, external calls, property sets, thrown exceptions
+
+4.5. UNTESTABLE BRANCHES — Scan the method for conditions that can NEVER be true in PlayMode:
+   - Input.GetKeyDown / Input.GetKey / Input.GetButton → always false in PlayMode
+   - Input.GetAxis / Input.GetAxisRaw → always 0 in PlayMode
+   - Input.GetMouseButton → always false in PlayMode
+
+   For each branch guarded SOLELY by one of the above, add it to untestableBranches with a reason.
+   The test generator will skip these entirely — no placeholder tests, no Assert.Pass().
+
+5. DEPENDENCIES — External project-specific types the method interacts with:
+   - Fields/arrays of the SAME class are NOT dependencies — they are internal state
+   - For each: list only the members the target method calls on it
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. PRIVATE MEMBERS — This section is CRITICAL for test generation.
+
+   Scan ALL of the following in class `Player` and fill privateMembers:
+
+   A. Fields without `public` access modifier that the target method reads or writes:
+      kind = "field"
+      Example: `private Queue<Vector3> waypoints` → { name: "waypoints", kind: "field", type: "Queue<Vector3>" }
+
+   B. Properties without `public` that the target method reads or writes:
+      kind = "property"
+      CRITICAL: a property declared as `private T Name { get { return expr; } }` has NO backing field.
+      `GetField("Name", NonPublic|Instance)` returns null — it cannot be set via Reflection.
+      In the notes field, record the underlying field(s) the getter reads from so the test generator
+      knows what to manipulate instead (e.g., "computed from mTetriminos list — set mTetriminos").
+
+   C. Nested types (enum, struct, class) declared INSIDE `Player` without `public`:
+      kind = "nestedType"
+      List ALL values if it is an enum.
+      Example: `enum State { Wait, Init }` → { name: "State", kind: "nestedType", type: "enum", nestedValues: ["Wait","Init"] }
+
+   D. Unity MonoBehaviour message methods if `Move` IS one of them:
+      These are ALWAYS considered private regardless of their declaration:
+      Update, FixedUpdate, LateUpdate, Awake, Start, OnEnable, OnDisable,
+      OnTriggerEnter2D, OnTriggerExit2D, OnCollisionEnter2D, OnCollisionExit2D,
+      OnTriggerEnter, OnTriggerExit, OnCollisionEnter, OnCollisionExit, OnDestroy
+      kind = "unityMessage"
+      Example: `void FixedUpdate()` → { name: "FixedUpdate", kind: "unityMessage", type: "void" }
+
+   RULES for privateMembers:
+   - In C#, a member with NO access modifier defaults to `private`
+   - Include a field if the target method body references it (reads, writes, calls methods on it)
+   - Do NOT include public members
+   - If there are no private members, return []
+
+7. START/AWAKE FIELDS — Scan Start() and Awake() in the context.
+   List every field initialized (assigned, newed, or fetched) inside Start() or Awake()
+   that the target method also reads or writes.
+   These MUST be manually initialized in test SetUp when Start/Awake are bypassed.
+
+   RULES for startAwakeFields:
+   - Include collections (Queue, List, Stack, Dictionary) initialized inside Start/Awake
+   - Include component references assigned via GetComponent or Find inside Start/Awake
+   - Include float/int/bool values assigned in Start/Awake that affect the method's branches
+   - notes = brief description of what value to use in tests (e.g., "initialize with one entry")
+
+8. NAMESPACES — Scan the assembled context for `namespace XYZ { }` blocks.
+   List every namespace that wraps the target class or any type the tests will need to reference.
+
+   If no project namespaces exist, return [].
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+9. PRE-FLIGHT CHECKLIST — The test generator will use this as authoritative ground truth.
+   Compute these decisions NOW so the test generator does not have to re-derive them.
+
+   A. TYPE INSTANTIATIONS — For EVERY type that the test will need to create
+      (target class AND all helper types: dependencies, view objects, data classes, etc.):
+
+      For each type, find its declaration in the assembled context and determine:
+        pattern = "AddComponent" if the type's declaration chain includes MonoBehaviour/Component/Behaviour
+        pattern = "new"          for plain C# classes and structs
+
+      To check the inheritance chain:
+        - Find `class TypeName : BaseClass`
+        - If BaseClass is MonoBehaviour/Component/Behaviour → AddComponent
+        - If BaseClass is another class (e.g., PoolingObject) → find THAT class's declaration and repeat
+        - Keep tracing until you reach a root class or MonoBehaviour
+
+      WRONG: `new TetriminoView()` if TetriminoView extends PoolingObject extends MonoBehaviour
+      CORRECT: `go.AddComponent<TetriminoView>()`
+
+      For "new" types, copy the EXACT constructor signature from the context:
+        - If the constructor requires parameters, note them ALL
+        - "parameterless": true only if an explicit `public TypeName() {}` or no constructor at all exists
+        - "parameterless": false if only parameterized constructors exist → MUST provide arguments
+
+      constructorNotes: describe how to build the minimum valid argument
+        e.g., "TetriminoSpecs requires serializedBlockPositions with exactly 100 ints (4×5×5), each 0 or 1"
+
+   B. COMPUTED PROPERTIES — For every private property (kind = "property") in privateMembers:
+      Identify the underlying field(s) its getter reads from.
+      The test cannot use GetField on the property — it must set the underlying fields instead.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MANDATORY VERIFICATION before responding:
+1. Count every `if`/`else if` in the method = N_conditions → decisionTable must have ≥ N_conditions×2 rows
+2. Count every `foreach`/`for`/`while` = N_loops → loops array must have exactly N_loops entries
+3. For each field in the method body: is it declared as private/protected or with no modifier? → add to privateMembers
+4. Is `Move` a Unity message method? → add to privateMembers with kind = "unityMessage"
+5. Look at Start() and Awake(): every field they assign that the target method also uses → add to startAwakeFields
+6. For EVERY type used in tests: trace the full inheritance chain → determine AddComponent or new
+7. For EVERY "new" type: copy its exact constructor signature → set parameterless correctly
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+RULES:
+- Output ONLY valid JSON (no explanations, no markdown, no comments).
+- Do not include extra fields.
+- Do not omit required fields.
+- If a section has no data, return an empty array [].
+
+OUTPUT FORMAT (STRICT JSON ONLY):
+
+{
+  "status": "READY",
+  "methodSummary": {
+    "name": "",
+    "inputs": [{ "name": "", "type": "" }],
+    "output": ""
+  },
+  "dependencies": [
+    { "name": "", "type": "class | struct | enum | external", "membersUsed": [""] }
+  ],
+  "decisionTable": [
+    { "conditions": [""], "branch": "true | false", "expectedBehavior": "" }
+  ],
+  "loops": [
+    { "type": "for | while | foreach", "condition": "" }
+  ],
+  "sideEffects": [""],
+  "privateMembers": [
+    {
+      "name": "",
+      "kind": "field | property | nestedType | unityMessage",
+      "type": "",
+      "notes": "optional — for property: which underlying field to set instead",
+      "nestedValues": ["optional, only for nestedType enum/struct"]
+    }
+  ],
+  "startAwakeFields": [
+    { "name": "", "type": "", "initIn": "Awake | Start", "notes": "" }
+  ],
+  "requiredUsings": ["TetrisEngine", "TetrisEngine.TetriminosPiece"],
+  "untestableBranches": [
+    { "condition": "Input.GetKeyDown(rotateRightKey)", "reason": "Input always false in PlayMode" }
+  ],
+  "preFlightChecklist": {
+    "typeInstantiations": [
+      {
+        "typeName": "GameLogic",
+        "pattern": "AddComponent | new",
+        "constructorSignature": "null if AddComponent, else exact signature e.g. Playfield(GameSettings gs)",
+        "parameterless": true,
+        "constructorNotes": "describe how to build minimum valid args, or empty string",
+        "reason": "extends MonoBehaviour | plain C# class"
+      }
+    ],
+    "computedProperties": [
+      {
+        "propertyName": "mCurrentTetrimino",
+        "getterSummary": "returns last element of mTetriminos if not locked",
+        "controlVia": "mTetriminos (List<TetriminoView>) — add a TetriminoView with isLocked=false"
+      }
+    ]
+  }
+}

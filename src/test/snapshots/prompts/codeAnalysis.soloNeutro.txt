@@ -1,0 +1,18 @@
+Method: Move(float distance, bool sprint) → bool
+
+Decision Table:
+  [TRUE] distance <= 0f → devuelve false
+  [FALSE] distance <= 0f → se desplaza
+
+Loops:
+  foreach(waypoints)
+
+Side Effects: escribe speed; llama a transform.Translate
+
+Dependencies:
+  class inventory: [HasStamina]
+
+Private Members (require Reflection):
+  [field] float speed
+  [nestedType] enum State — values: Wait, Init
+  [unityMessage] void FixedUpdate

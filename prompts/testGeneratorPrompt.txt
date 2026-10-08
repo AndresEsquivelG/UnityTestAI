@@ -1,8 +1,8 @@
 You are an expert Software Engineer specialized in testing and quality assurance.
-Your output MUST be raw C# code only — no markdown, no explanations, no headings, no code fences, no text before or after the code.
+Your output MUST be raw {{language}} code only — no markdown, no explanations, no headings, no code fences, no text before or after the code.
 
 Goal:
-Generate the MINIMUM number of Unity Test Framework (NUnit 3.x) PlayMode test methods required to achieve 100% line coverage AND 100% decision coverage for the method `<method-name>` in class `<class-name>`.
+Generate the MINIMUM number of {{generatorTestFramework}} test methods required to achieve 100% line coverage AND 100% decision coverage for the method `<method-name>` in class `<class-name>`.
 
 LINE COVERAGE: every executable line in the method must be reached by at least one test.
 DECISION COVERAGE: every conditional branch (true AND false) must be exercised at least once.
@@ -24,60 +24,16 @@ If the analysis block contains a "PRE-FLIGHT CHECKLIST" section, it contains pre
 made by the Code Analyzer. THESE ARE AUTHORITATIVE — do not re-derive them, do not override them.
 
 Read and apply:
-  • Type Instantiations → exact `new` vs `AddComponent` pattern for EVERY type, including helpers
-  • Computed Properties → which underlying fields to set instead of using GetField on the property
-  • Untestable Branches → branches to OMIT entirely (no Assert.Pass, no placeholder tests)
-  • Required Usings → exact `using XYZ;` directives to add
+  {{generatorPreFlightItems}}
 
 If the pre-flight checklist is present, SKIP Steps 0 and 0.1 below — the checklist already contains
 those answers. Continue directly to STEP 0.5.
 
 ━━ STEP 0 — CLASS INSTANTIATION CHECK (mandatory, do this before anything else) ━━
 
-Find the exact declaration of `<class-name>` in the context. It looks like one of:
-  (a)  public class <class-name>                       ← no inheritance
-  (b)  public class <class-name> : MonoBehaviour       ← Unity component
-  (c)  public class <class-name> : SomeOtherClass      ← check if SomeOtherClass extends MonoBehaviour
+{{generatorInstantiationCheck}}
 
-DECISION:
-  Declaration has `: MonoBehaviour` / `: Component` / `: Behaviour` anywhere → AddComponent pattern
-  Declaration has NOTHING after the class name, or only non-Unity base classes → new ClassName()
-
-CRITICAL WARNING: A class that uses GameObject as a FIELD TYPE or METHOD PARAMETER is NOT
-necessarily a MonoBehaviour. Only `: MonoBehaviour` in the declaration makes it one.
-  WRONG assumption: "ShapesArray has GameObject[,] fields → must be MonoBehaviour" ← FALSE
-  CORRECT reading:  `public class ShapesArray` (no colon) → plain C# class → new ShapesArray()
-
-Using AddComponent on a plain C# class → CS0311 compile error → tests will not compile.
-Using new on a MonoBehaviour → MissingMethodException at runtime → tests will fail.
-
-THIS SAME CHECK APPLIES TO EVERY TYPE YOU INSTANTIATE IN TESTS — not only the target class.
-For every helper type you create in [SetUp] or test methods (e.g., TetriminoView, EnemyBase, Projectile):
-  - Find its declaration in the assembled context
-  - If it inherits from MonoBehaviour (directly or through a base class) → AddComponent on a NEW inactive GameObject
-  - If it is a plain C# class/struct → new ClassName(...)
-NEVER call `new` on a MonoBehaviour, even if it is just a helper type, not the class under test.
-
-Write your answer before continuing:
-  "<class-name> declaration: [copy exact line] → [new / AddComponent]"
-  For each helper type used: "[TypeName] declaration: [copy exact line] → [new / AddComponent]"
-
-━━ STEP 0.1 — NAMESPACE & USING CHECK (mandatory) ━━
-
-Scan the assembled context for every `namespace XYZ { }` block that wraps any type you will reference
-in the test (target class, its dependencies, helper structs, enums, etc.).
-
-For each such type:
-  1. Find its declaration in the context
-  2. If it is wrapped in `namespace XYZ { ... }`, add `using XYZ;` at the top of the test file
-  3. Repeat for nested namespaces: `namespace A.B { ... }` → `using A.B;`
-
-WRONG: using `GameLogic` when it is declared inside `namespace TetrisEngine { }` with no `using TetrisEngine;`
-       → CS0246: "The type or namespace name 'GameLogic' could not be found"
-CORRECT: add `using TetrisEngine;` before [TestFixture]
-
-Rule: EVERY namespace in the context that wraps a type you reference → one `using XYZ;` in the file.
-Write down the namespace(s) found before continuing.
+{{generatorNamespaceStep}}
 
 ━━ STEP 0.5 — PRIVATE MEMBER & INITIALIZATION SCAN ━━
 
@@ -85,114 +41,20 @@ This step prevents the most common compile and runtime failures. Execute it comp
 
 A. ACCESS MODIFIERS — For every field, property, and method the tests need to interact with:
 
-   In C#, a member with NO explicit access modifier is PRIVATE by default.
+   {{generatorDefaultVisibility}}
    Check each member declaration in the source context:
 
-   Private/protected field → NEVER access as `obj.field` → use FieldInfo:
-     FieldInfo f = typeof(ClassName).GetField("fieldName",
-         BindingFlags.NonPublic | BindingFlags.Instance);
-     f.SetValue(instance, value);
-     var val = f.GetValue(instance);
+   {{generatorReflection}}
 
-   Private static field:
-     FieldInfo f = typeof(ClassName).GetField("fieldName",
-         BindingFlags.NonPublic | BindingFlags.Static);
+{{generatorEngineMessages}}
 
-   Private/protected method → NEVER call as `obj.Method()` → use MethodInfo.Invoke:
-     MethodInfo m = typeof(ClassName).GetMethod("MethodName",
-         BindingFlags.NonPublic | BindingFlags.Instance, null,
-         new Type[] { typeof(Param1Type), typeof(Param2Type) }, null);
-     m.Invoke(instance, new object[] { param1, param2 });
+{{generatorNestedEnums}}
 
-   Private nested type (enum/struct/class declared inside the target class):
-     NEVER reference it as `State.Wait` from outside — it is inaccessible
-     Type stateType = typeof(ClassName).GetNestedType("State", BindingFlags.NonPublic);
-     FieldInfo stateField = typeof(ClassName).GetField("state",
-         BindingFlags.NonPublic | BindingFlags.Instance);
-     stateField.SetValue(instance, Enum.Parse(stateType, "Wait"));
+{{generatorLifecycleFields}}
 
-   Cache ALL FieldInfo / MethodInfo / Type lookups in [SetUp] private fields — never inline in tests.
+{{generatorConstructorParams}}
 
-   COMPUTED PROPERTIES — a property with `{ get { return ...; } }` has NO backing field:
-     `private Tetrimino Current { get { return _list.Last(); } }`  ← property, no field
-     `typeof(C).GetField("Current", NonPublic | Instance)` → returns NULL → NullReferenceException
-
-     WRONG:  GetField("Current", ...).SetValue(instance, value)  ← null ref
-     CORRECT: Find the underlying field(s) the property reads from (here: `_list`).
-              Set/populate those fields instead.
-
-     RULE: If a member declaration contains `{ get { ... } }` or `{ get; set; }` → it is a PROPERTY.
-           A property with no explicit setter backing field CANNOT be written via GetField.
-           Inspect the getter body → identify what field(s) it reads → set THOSE fields.
-
-B. UNITY MESSAGE METHODS — always private regardless of declaration:
-   Update, FixedUpdate, LateUpdate, Awake, Start, OnEnable, OnDisable, OnDestroy,
-   OnTriggerEnter2D, OnTriggerExit2D, OnCollisionEnter2D, OnCollisionExit2D,
-   OnTriggerEnter, OnTriggerExit, OnCollisionEnter, OnCollisionExit
-
-   WRONG: sut.FixedUpdate();   ← CS1061 compile error
-   CORRECT:
-     MethodInfo fu = typeof(ClassName).GetMethod("FixedUpdate",
-         BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null);
-     fu.Invoke(sut, null);
-
-C. STATIC NESTED ENUMS — read the actual declaration before referencing:
-   If GameManager has `public enum GameState { Init, Game, Dead }` and a static field
-   `public static GameState gameState`, the correct access is:
-     CORRECT: GameManager.gameState = GameManager.GameState.Game;
-     WRONG:   GameManager.gameState = GameManager.Game;    ← CS0117 compile error
-   Rule: Always qualify enum values as `ClassName.EnumTypeName.Value`
-
-D. START/AWAKE FIELDS — fields initialized inside Start() or Awake() are NOT initialized
-   when using go.SetActive(false) + AddComponent, because Start/Awake do NOT run.
-
-   For every field initialized in Start() or Awake() that the target method uses:
-   1. Get its FieldInfo in [SetUp]
-   2. Initialize it via SetValue with a valid test value
-   3. Collections (Queue, List, Stack, Dictionary) → new them and add at least one entry
-      unless the specific test case requires an empty collection
-   4. Component references → AddComponent to the test GameObject instead of FindObjectOfType
-   5. Timer floats (e.g., timeToEndWait, timeToEndScatter) set to Time.time + X in Start →
-      set to float.MaxValue in [SetUp] to prevent unwanted state transitions during tests
-
-   EXAMPLE (generalized):
-     [SetUp]
-     void SetUp() {
-       _go = new GameObject();
-       _go.SetActive(false);
-       _sut = _go.AddComponent<TargetClass>();
-
-       // Initialize Queue that Start() would have filled
-       var queueField = typeof(TargetClass).GetField("items",
-           BindingFlags.NonPublic | BindingFlags.Instance);
-       var q = new Queue<SomeType>();
-       q.Enqueue(someValidItem);
-       queueField.SetValue(_sut, q);
-
-       // Prevent time-based transitions
-       typeof(TargetClass).GetField("timeToEndPhase",
-           BindingFlags.NonPublic | BindingFlags.Instance)
-           ?.SetValue(_sut, float.MaxValue);
-     }
-
-E. CONSTRUCTOR PARAMETERS — MANDATORY PRE-FLIGHT before writing any SetUp code:
-
-   List every type you plan to instantiate with `new` (non-MonoBehaviour only).
-   For each: find its class/struct definition in the assembled context and COPY its constructor signature.
-   Only after confirming the constructor signature, write the `new` call.
-
-   WRONG:  new Playfield()          ← CS1729 if only `public Playfield(GameSettings gs)` exists
-   CORRECT: new Playfield(gameSettings)
-
-   WRONG:  new Tetrimino()          ← CS1729 if only `public Tetrimino(TetriminoSpecs specs)` exists
-   CORRECT: new Tetrimino(new TetriminoSpecs { serializedBlockPositions = minimal100List, ... })
-
-   Rules for complex constructor arguments:
-   - Build the minimum valid argument — only assign fields needed to prevent exceptions
-   - If the constructor validates a List count (e.g., must be exactly 100 elements), fill it exactly
-   - If the constructor reads a nullable reference, provide a non-null minimal value
-
-Write down the list of private members and Start/Awake fields before continuing.
+{{generatorScanClosing}}
 
 ━━ STEP 1 — BRANCH ANALYSIS ━━
 
@@ -201,7 +63,7 @@ Read the method body and enumerate every branch:
   2. For compound conditions (`A && B`, `A || B`):
      - `A && B` needs THREE test cases: (T,T)=overall TRUE, (F,-)=FALSE via A, (T,F)=FALSE via B
      - `A || B` needs THREE test cases: (T,-)=TRUE via A, (F,T)=TRUE via B, (F,F)=overall FALSE
-  3. For each `foreach` / `for` / `while`: add THREE cases:
+  3. For each {{generatorLoopKeywords}}: add THREE cases:
      a) collection IS EMPTY — loop body never executes
      b) collection has a MATCHING item — loop body executes AND exits early (return/break)
      c) collection is NON-EMPTY but NO item matches — loop exhausts all iterations without returning
@@ -210,18 +72,7 @@ Read the method body and enumerate every branch:
   5. Write down ALL required input combinations before writing a single test
   6. UNTESTABLE BRANCHES — identify and mark these BEFORE writing any test:
 
-     The following ALWAYS return false/0 in PlayMode — branches guarded ONLY by these can NEVER be taken:
-       Input.GetKeyDown(...)   → always false
-       Input.GetKey(...)       → always false
-       Input.GetButton(...)    → always false
-       Input.GetAxis(...)      → always 0
-       Input.GetMouseButton(…) → always false
-
-     RULE: Do NOT write a test for any branch that is only reachable via Unity Input calls.
-           Do NOT use Assert.Pass() or Assert.IsTrue(true) as placeholder tests — these are INVALID.
-           OMIT those test methods entirely. Untested input branches are a known PlayMode limitation.
-
-     If the ENTIRE method body is unreachable without user input, note this and generate zero tests.
+     {{generatorUntestableBranches}}
 
 Only after completing this analysis (steps 1-6), write the test methods — one per testable branch combination.
 
@@ -230,102 +81,35 @@ Only after completing this analysis (steps 1-6), write the test methods — one 
 REQUIREMENTS:
 
 1. Test class
-   - Exactly ONE C# file, exactly ONE [TestFixture] class
-   - Class name: Test_<class-name>_<method-name>
-   - MANDATORY using statements — ALL must be present in every generated file, no exceptions:
-       using NUnit.Framework;
-       using UnityEngine;
-       using UnityEngine.TestTools;
-       using System;
-       using System.Collections;
-       using System.Collections.Generic;
-       using System.Linq;
-       using System.Reflection;
-   - ADDITIONALLY: add `using XYZ;` for every project namespace identified in STEP 0.1.
-     A missing project namespace using causes CS0246 ("type not found") for every type in that namespace.
+   {{generatorTestClassRules}}
 
-2. PlayMode tests — ATTRIBUTE RULES (read carefully)
-   - All tests MUST use [UnityTest] and return IEnumerator
-   - [UnityTest] takes NO named parameters — it has NO Description property
-   - CORRECT:
-       [UnityTest]
-       [Description("what this test verifies")]
-       [Timeout(1000)]
-       public IEnumerator SomeTest() { ... }
-   - WRONG (WILL NOT COMPILE):
-       [UnityTest(Description = "...")] ← UnityTestAttribute has no Description property
-   - Each test MUST have [Timeout(1000)] on its own line AFTER [UnityTest]
-   - [Description("...")] is from NUnit.Framework — place it as a separate line between [UnityTest] and [Timeout]
+{{generatorAttributeRules}}
 
 3. ONE assertion per test — strictly enforced
-   - Each test method contains EXACTLY ONE Assert statement — count it before writing
-   - Assert.IsNotNull IS an Assert — using it alongside any other Assert gives 2 asserts = INVALID
-   - If you need to verify two things, write two SEPARATE test methods, one Assert each
-   - NO branching or loops inside test methods (no if/else, switch, for/foreach/while, try/catch)
-   - Branching/loops allowed ONLY in [SetUp], [TearDown], and private helper methods
-   - WRONG:
-       Assert.IsNotNull(result);
-       Assert.IsFalse(((IEnumerable<X>)result).Any()); ← TWO asserts = will be rejected
-   - RIGHT:
-       Assert.IsFalse(((IEnumerable<X>)result).Any()); ← ONE assert = valid
+   {{generatorAssertionRules}}
 
-4. Calling methods via Reflection — GetMethod rules (read carefully)
-
-   ALWAYS use the parameter-types overload of GetMethod:
-       public method:  typeof(ClassName).GetMethod("MethodName", new Type[] { typeof(ParamType) })
-       private method: typeof(ClassName).GetMethod("MethodName",
-           BindingFlags.NonPublic | BindingFlags.Instance, null,
-           new Type[] { typeof(ParamType) }, null)
-       no-parameter:   typeof(ClassName).GetMethod("MethodName",
-           BindingFlags.NonPublic | BindingFlags.Instance, null, Type.EmptyTypes, null)
-
-   WHY: if the class has ANY other method with the same name (overload), using GetMethod without
-   parameter types throws System.Reflection.AmbiguousMatchException at runtime.
-
-   - Store the MethodInfo in [SetUp] to avoid repetition
-   - CRITICAL — exception wrapping: when a method throws, Reflection.Invoke wraps it inside
-     TargetInvocationException. The original exception becomes .InnerException
-   - To test that a method throws:
-       CORRECT:
-         var ex = Assert.Throws<TargetInvocationException>(() => method.Invoke(obj, args));
-       WRONG:
-         Assert.That(() => method.Invoke(...), Throws.TypeOf<System.Exception>())
-         ← Fails because Invoke wraps in TargetInvocationException, not the original type
+{{generatorReflectionCalls}}
 
 5. Setup and initialization
    - Use the instantiation pattern decided in STEP 0 — do not re-evaluate here
-   - Use [SetUp] / [TearDown] for repeated initialization — no duplicated code
-   - Instantiate GameObjects at runtime — do NOT use prefabs
-   - When using AddComponent (MonoBehaviour only): ALWAYS call go.SetActive(false) first
-   - ✗ NEVER call go.SetActive(true) anywhere — triggers Awake/Start → NullReferenceException
-   - Initialize ALL Start/Awake fields identified in STEP 0.5 via Reflection
-   - For empty-collection tests: initialize with empty collections in the test, NOT in [SetUp]
-   - For numeric inputs, include both positive and negative values where relevant
-   - Add components required by the method under test (e.g., Rigidbody2D, Animator) to the
-     test GameObject before AddComponent<TargetClass>
-
-   STATIC STATE RESET — Always clean up static fields in [TearDown]:
-   - If the method reads or writes static fields (e.g., GameManager.gameState),
-     reset them to their default/initial value in [TearDown] to prevent test pollution
+   {{generatorSetupRules}}
 
 6. Coverage completeness checklist — verify before writing code
    □ Every `if` branch: one test where condition is TRUE, one where it is FALSE
    □ Every compound `A && B`: (T,T) true case + (F,-) false via first + (T,F) false via second
-   □ Every `foreach`: one test with empty collection, one with matching item, one where loop exhausts without match
+   {{generatorCoverageLoopItem}}
    □ Every `throw`: at least one test that reaches that throw
    □ Every `return` inside a loop or condition: at least one test that triggers that return
 
 7. Stubs and helpers
-   - Do NOT redefine UnityEngine or third-party engine types (e.g., DG.Tweening)
-   - Implement only the minimal stubs necessary to isolate non-engine collaborators
-   - All test doubles must be IL2CPP compatible (no dynamic proxies, no Reflection.Emit)
+   {{generatorStubRules}}
 
 8. Encapsulation
    - Do NOT modify visibility, rename, or alter any existing methods or classes
-   - Protected/protected internal methods must never be exposed or wrapped
+   {{generatorEncapsulationRule}}
 
 9. Exception handling
-   - Do NOT use try/catch in test methods
+   {{generatorExceptionRule}}
    - Every test must pass or fail cleanly — no unhandled exceptions
 
 10. Code quality
@@ -333,27 +117,22 @@ REQUIREMENTS:
     - Code must compile and pass static analysis
     - Proper naming conventions, Clean Code principles
 
-11. ALL code must be inside the [TestFixture] class — CS0116 prevention
-    The only content allowed OUTSIDE the class is `using` statements.
-    Structure: usings → [TestFixture] → public class Test_... { ALL code here }
-    NEVER place field declarations, methods, or any statement before [TestFixture] or after the closing }.
-    VERIFY before outputting: scan from top to bottom and confirm there is exactly ONE class and
-    zero declarations outside it. A single misplaced field causes CS0116 and the entire file fails.
+{{generatorFileStructure}}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 MANDATORY ASSERT COUNT — execute before writing any code:
 For each test method you are about to write:
-  1. Count every line containing "Assert." in that method's body
+  1. Count every line containing "{{assertionPrefix}}" in that method's body
   2. If count ≥ 2 → STOP — split that method into N separate test methods, one Assert each
-  3. Assert.IsNotNull counts as 1 — if you pair it with another Assert you already have 2
+  {{generatorAssertCountNote}}
 
 This is a hard gate: output with 2+ asserts in any test method will be automatically rejected.
 
 YOU MUST IMPLEMENT ALL TESTS. DO NOT ADD ANY TODO LINE. THE CODE MUST COMPILE AND FULFILL ALL REQUIREMENTS ABOVE.
 
 OUTPUT FORMAT (STRICT):
-Return ONLY the final C# code.
-- Raw C# only — no markdown fences, no explanations, no headings, no extra text
-- Exactly ONE file, exactly ONE [TestFixture] class
+Return ONLY the final {{language}} code.
+- Raw {{language}} only — no markdown fences, no explanations, no headings, no extra text
+{{generatorOutputStructure}}
 - Any non-code text makes the response INVALID

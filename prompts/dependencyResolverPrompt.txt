@@ -9,11 +9,9 @@ STRICT RULES:
 - DO NOT add any text outside the JSON object
 - DO NOT wrap JSON in markdown
 - DO NOT infer or guess file paths — ONLY use exact paths from the projectTree
-- IGNORE Unity built-in types (MonoBehaviour, GameObject, Transform, Vector3, etc.)
-- IGNORE standard .NET types (System.*, Collections.*, Linq.*)
-- IGNORE third-party types (DG.Tweening.*, UnityEngine.UI.*, etc.)
+{{ignoredTypes}}
 - A dependency counts ONLY if its type is referenced directly in the target method:
-  - Generic type usage (e.g., GetComponent<Shape>())
+  {{dependencyEvidence}}
   - Casts or type checks
   - Object creation (new SomeType())
   - Enum or static type references
@@ -36,7 +34,7 @@ OUTPUT (raw JSON, nothing else):
 If dependencies are missing:
 {
   "status": "MISSING_DEPENDENCIES",
-  "files": ["Assets/.../File.cs"],
+  "files": [{{sourcePathExample}}],
   "codeSlice": "... echo back the input code slice exactly as received ..."
 }
 

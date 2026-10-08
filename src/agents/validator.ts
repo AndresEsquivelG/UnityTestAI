@@ -2,13 +2,23 @@ import * as fs from "fs";
 import * as path from "path";
 import { z } from "zod";
 import { buildContextValidatorPrompt, buildTestValidatorPrompt } from "../prompts/promptBuilder";
+import type { PromptProfile } from "../core/contracts";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
+import { readCodeField } from "../utils/codeField";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
 
+/**
+ * `UNFIXED`: el validador encontró problemas pero no trajo corrección. Es una
+ * respuesta legítima y no un formato roto: al validador de contexto le puede
+ * faltar justo lo que habría que agregar —la declaración de un tipo que nadie
+ * pidió—, y no tiene de dónde sacarlo sin inventarlo. `output` es la entrada
+ * sin tocar.
+ */
 export const validatorOutputSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("VALID"),   output: z.string() }),
   z.object({ status: z.literal("FIXED"),   output: z.string(), issues: z.array(z.string()) }),
+  z.object({ status: z.literal("UNFIXED"), output: z.string(), issues: z.array(z.string()) }),
   z.object({ status: z.literal("ERROR"),   message: z.string() }),
 ]);
 
@@ -42,7 +52,7 @@ function parseValidatorResponse(
       z.object({
         status: z.literal("INVALID"),
         issues: z.array(z.string()),
-        [fixedKey]: z.string(),
+        [fixedKey]: z.string().optional(),
       }),
     ]);
 
@@ -52,10 +62,21 @@ function parseValidatorResponse(
       return { status: "VALID", output: originalOutput };
     }
 
-    const fixedOutput = stripSpuriousLeadingBrace(
-      (parsed as Record<string, any>)[fixedKey] as string
-    );
-    return { status: "FIXED", output: fixedOutput, issues: (parsed as any).issues };
+    const issues: string[] = (parsed as any).issues;
+    const correction = (parsed as Record<string, any>)[fixedKey] as string | undefined;
+    if (correction === undefined || correction.trim() === "") {
+      return { status: "UNFIXED", output: originalOutput, issues };
+    }
+
+    const fixed = readCodeField(stripSpuriousLeadingBrace(correction));
+    if (!fixed.ok) {
+      // Los problemas que encontró siguen valiendo aunque su corrección no sirva.
+      return {
+        status: "ERROR",
+        message: `Discarded the validator's correction: ${fixed.reason}. Reported issues: ${issues.join("; ")}`,
+      };
+    }
+    return { status: "FIXED", output: fixed.code, issues };
   } catch (err: any) {
     return { status: "ERROR", message: `Failed to parse validator response: ${err.message}` };
   }
@@ -64,6 +85,8 @@ function parseValidatorResponse(
 // ── Context Validator ──────────────────────────────────────────────────────────
 
 export interface ContextValidatorInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   assembledContext: string;
   className: string;
   methodName: string;
@@ -75,7 +98,7 @@ export interface ContextValidatorInput {
  * Agent 2.5 — Context Validator
  *
  * Verifies that the assembled context produced by the Context Builder contains
- * everything needed to generate NUnit tests. If the LLM finds structural gaps
+ * everything needed to generate the tests. If the LLM finds structural gaps
  * it returns a corrected context in the same call (one implicit retry).
  *
  * Saves:
@@ -91,6 +114,7 @@ export async function runContextValidator(
   fs.mkdirSync(dumpDir, { recursive: true });
 
   const prompt = buildContextValidatorPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.assembledContext,
@@ -115,6 +139,8 @@ export async function runContextValidator(
 // ── Test Validator ─────────────────────────────────────────────────────────────
 
 export interface TestValidatorInput {
+  /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
+  profile: PromptProfile;
   testCode: string;
   assembledContext: string;
   className: string;
@@ -125,7 +151,7 @@ export interface TestValidatorInput {
 /**
  * Agent 3.5 — Test Validator
  *
- * Verifies the generated C# NUnit test class for structural correctness and
+ * Verifies the generated test unit for structural correctness and
  * branch coverage. If the LLM finds issues it returns corrected code in the
  * same call (one implicit retry).
  *
@@ -142,6 +168,7 @@ export async function runTestValidator(
   fs.mkdirSync(dumpDir, { recursive: true });
 
   const prompt = buildTestValidatorPrompt(
+    input.profile,
     input.methodName,
     input.className,
     input.assembledContext,

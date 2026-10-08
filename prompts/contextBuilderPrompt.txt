@@ -16,14 +16,12 @@ STRICT RULES:
 - DO NOT modify, rename, or reformat any code — copy it EXACTLY as written
 - DO NOT include a member because it is "useful for testing" or "related to" another included member
 - DO NOT include a method just because it initializes or affects a referenced property — it must be CALLED in the method body
-- DO NOT remove using statements that the included members need
-- ALWAYS include the class/struct/enum declaration line (name, base class, interfaces)
-- For enums: include the FULL enum body if ANY value name appears in the target method body
-- For classes/structs: include ONLY the fields/properties/methods whose identifier appears in the target method body
+- DO NOT remove {{importStatements}} that the included members need
+{{dependencySliceRules}}
 - Constructor rule: include it ONLY if a constructor call (`new ClassName(...)`) appears in the target method body
-- Remove using statements required ONLY by excluded members
+- Remove {{importStatements}} required ONLY by excluded members
 
-IMPORTANT: The relevantSlice must be valid C# — close every opened block with `}`.
+{{dependencySliceSyntax}}
 
 MANDATORY VERIFICATION (execute before writing JSON):
 For each dependency file:
@@ -42,7 +40,7 @@ Dependency files:
 TASK:
 1. Execute MANDATORY VERIFICATION for each dependency file
 2. For each file, build a compilable slice containing ONLY the verified members
-3. Include only the using statements those members need
+3. Include only the {{importStatements}} those members need
 
 OUTPUT (raw JSON, nothing else):
 
@@ -50,8 +48,7 @@ OUTPUT (raw JSON, nothing else):
   "status": "READY",
   "dependencySlices": [
     {
-      "filePath": "Assets/.../File.cs",
-      "relevantSlice": "using UnityEngine;\n\npublic class SomeClass\n{\n    public string SomeProp { get; set; }\n}"
+      {{dependencySliceExample}}
     }
   ]
 }
