@@ -12,9 +12,15 @@ const methodInputSchema = z.object({
   type: z.string(),
 });
 
+/**
+ * `type` es texto libre por el mismo motivo que `privateMemberSchema.kind`: las
+ * clases de tipo dependen del lenguaje, y los valores válidos se los dicta al
+ * modelo el perfil del adaptador (`analyzerDependencyKinds`). Con la lista de
+ * C# fija aquí, el análisis de cualquier otro ecosistema no validaba.
+ */
 const dependencySchema = z.object({
   name: z.string(),
-  type: z.enum(["class", "struct", "enum", "external"]),
+  type: z.string(),
   membersUsed: z.array(z.string()),
 });
 
