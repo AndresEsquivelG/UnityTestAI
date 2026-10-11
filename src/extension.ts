@@ -5,6 +5,7 @@ import { createWebviewPanel } from "./webview/webviewManager";
 import { AdapterRegistry, selectEcosystem } from "./core/adapters";
 import type { DetectionContext } from "./core/contracts";
 import { UnityAdapter } from "./adapters/unity/unityAdapter";
+import { JavaAdapter } from "./adapters/java/javaAdapter";
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
@@ -21,6 +22,7 @@ dotenv.config({ path: path.join(__dirname, "..", ".env") });
 function createRegistry(): AdapterRegistry {
   const registry = new AdapterRegistry();
   registry.register(new UnityAdapter());
+  registry.register(new JavaAdapter());
   return registry;
 }
 
