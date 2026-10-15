@@ -27,14 +27,15 @@ import type {
 } from "./verification";
 
 /**
- * Interfaz de adaptación: las diecisiete operaciones comunes a todo
- * ecosistema, OP-01 a OP-17. Las dieciséis primeras son las de la tabla de
- * operaciones original; OP-17 se agregó después (ver `detectDependencies`).
+ * Interfaz de adaptación: las dieciocho operaciones comunes a todo ecosistema,
+ * OP-01 a OP-18. Las dieciséis primeras son las de la tabla de operaciones
+ * original; OP-17 y OP-18 se agregaron después (ver `detectDependencies` y
+ * `describeUnit`).
  *
  * DIVISIÓN OBLIGATORIA / OPCIONAL
  *
- * Las once operaciones obligatorias son miembros requeridos. Las seis
- * opcionales —OP-09, OP-13, OP-14, OP-15, OP-16 y OP-17— son miembros
+ * Las once operaciones obligatorias son miembros requeridos. Las siete
+ * opcionales —OP-09, OP-13, OP-14, OP-15, OP-16, OP-17 y OP-18— son miembros
  * opcionales de la interfaz, además de estar declaradas en `capabilities`. La
  * doble declaración
  * es deliberada:
@@ -111,6 +112,26 @@ export interface EcosystemAdapter {
     code: string,
     focus?: UnitTarget
   ): Promise<readonly string[]>;
+
+  /**
+   * OP-18 — Ficha de la unidad, leída del código. OPCIONAL.
+   * Presente si y solo si `capabilities.unitFacts` es true.
+   *
+   * Recibe el archivo entero de la unidad, sin recortar, y devuelve un bloque de
+   * texto para los prompts con lo que los agentes no deberían adivinar: cómo se
+   * crea una instancia, qué declara el tipo y qué llama la unidad. La cadena
+   * vacía significa que no hay nada que decir. Es síncrona: todo sale del texto.
+   *
+   * El núcleo la agrega al contexto después del validador de contexto, de modo
+   * que ningún modelo la recorta ni la reescribe, y de ahí llega al analizador,
+   * al generador, al validador de la prueba y al corrector.
+   *
+   * No está en la tabla original. Existe porque el contexto que ven los agentes
+   * puede venir recortado o mal resumido por otro modelo, y un error así se
+   * hereda de agente en agente: cada uno arranca sin el historial de los
+   * anteriores y solo sabe lo que le llega en el prompt.
+   */
+  describeUnit?(code: string, target: UnitTarget): string;
 
   // ── Generación ───────────────────────────────────────────────────────────
 
@@ -242,6 +263,10 @@ export type SchemaExtendingAdapter = EcosystemAdapter &
 export type DependencyDetectingAdapter = EcosystemAdapter &
   Required<Pick<EcosystemAdapter, "detectDependencies">>;
 
+/** Adaptador que sí arma la ficha de la unidad (OP-18). */
+export type UnitDescribingAdapter = EcosystemAdapter &
+  Required<Pick<EcosystemAdapter, "describeUnit">>;
+
 /**
  * La guarda no distingue compilación de comprobación de importabilidad: para el
  * núcleo son la misma etapa. Esa diferencia es de presentación y se lee en
@@ -275,4 +300,8 @@ export function supportsDependencyDetection(
     a.capabilities.dependencyDetection &&
     typeof a.detectDependencies === "function"
   );
+}
+
+export function supportsUnitFacts(a: EcosystemAdapter): a is UnitDescribingAdapter {
+  return a.capabilities.unitFacts && typeof a.describeUnit === "function";
 }

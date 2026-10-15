@@ -103,9 +103,8 @@ export function presentCoverage(
         (file) => `Archivo ${file.filePath}: ${describeMetric(file.line)}.`
       );
       details.push(
-        outcome.decision
-          ? `Decisión: ${describeMetric(outcome.decision, "decisiones")}.`
-          : "Decisión: no disponible."
+        describeOptional("Decisión del archivo", outcome.decision, "decisiones", "no tiene condiciones"),
+        describeOptional("Instrucción del archivo", outcome.instruction, "instrucciones", "no tiene código")
       );
       details.push(...(outcome.notes ?? []));
 
@@ -121,6 +120,26 @@ export function presentCoverage(
       };
     }
   }
+}
+
+/**
+ * Una cifra que la herramienta puede no medir. Sin dato es «no disponible»;
+ * con total cero midió y no había nada que cubrir, que no es lo mismo que
+ * no cubrir nada.
+ */
+function describeOptional(
+  label: string,
+  metric: CoverageMetric | undefined,
+  counted: string,
+  nothingToCover: string
+): string {
+  if (!metric) {
+    return `${label}: no disponible.`;
+  }
+  if (metric.total === 0) {
+    return `${label}: ${nothingToCover}.`;
+  }
+  return `${label}: ${describeMetric(metric, counted)}.`;
 }
 
 /** «66,7 % de líneas (2 de 3)», con coma decimal. */

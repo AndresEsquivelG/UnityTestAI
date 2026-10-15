@@ -23,6 +23,7 @@
  *   OP-15  Informe de cobertura     (op) → CoverageResult             verification.ts
  *   OP-16  Ciclo de vida            (op) → void                       ecosystemAdapter.ts
  *   OP-17  Dependencias detectadas  (op) → string[]                   ecosystemAdapter.ts
+ *   OP-18  Ficha de la unidad       (op) → string                     ecosystemAdapter.ts
  *
  * (op) = operación opcional: el adaptador puede no implementarla.
  *
@@ -30,6 +31,10 @@
  * las dependencias es del agente resolutor, y el adaptador solo las traduce a
  * rutas (OP-07). Se agregó porque el agente omite tipos del proyecto; ver la
  * justificación en `EcosystemAdapter.detectDependencies`.
+ *
+ * OP-18 tampoco está en la tabla original. Se agregó porque los agentes heredan
+ * los errores de un contexto recortado o mal resumido; ver la justificación en
+ * `EcosystemAdapter.describeUnit`.
  *
  * OP-13 se nombra verificación y no compilación porque en un ecosistema
  * interpretado la etapa equivalente comprueba sintaxis e importabilidad; qué
@@ -107,6 +112,7 @@ export type {
   EcosystemAdapter,
   SchemaExtendingAdapter,
   TestRunningAdapter,
+  UnitDescribingAdapter,
   VerifyingAdapter,
 } from "./ecosystemAdapter";
 
@@ -115,5 +121,6 @@ export {
   supportsDependencyDetection,
   supportsSchemaExtension,
   supportsTestRun,
+  supportsUnitFacts,
   supportsVerification,
 } from "./ecosystemAdapter";

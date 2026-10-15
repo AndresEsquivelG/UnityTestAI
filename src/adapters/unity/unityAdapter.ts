@@ -45,7 +45,7 @@ export interface UnityAdapterOptions {
  * Adaptador del ecosistema Unity / C#.
  *
  * Primera implementación de la interfaz de adaptación. Cubre las once
- * operaciones obligatorias y cinco de las seis opcionales: OP-09; OP-13,
+ * operaciones obligatorias y cinco de las siete opcionales: OP-09; OP-13,
  * OP-14 y OP-15, que compilan el proyecto, ejecutan la prueba y miden su
  * cobertura con el editor de Unity en modo batch, y OP-17, que detecta los
  * tipos del proyecto que usa la unidad.
@@ -78,6 +78,7 @@ export class UnityAdapter implements EcosystemAdapter {
     analysisSchemaExtension: true,
     lifecycle: false,
     dependencyDetection: true,
+    unitFacts: false,
   };
 
   detectApplicability(context: DetectionContext): Promise<ApplicabilityResult> {

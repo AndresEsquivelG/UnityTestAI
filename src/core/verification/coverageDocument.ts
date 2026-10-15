@@ -26,6 +26,8 @@ export interface CoverageDocument {
   readonly line: CoverageMetric;
   /** Ausente quiere decir «no disponible». */
   readonly decision?: CoverageMetric;
+  /** Ausente quiere decir «no disponible». */
+  readonly instruction?: CoverageMetric;
   readonly notes: readonly string[];
   readonly files: readonly CoverageDocumentFile[];
 }
@@ -102,6 +104,7 @@ export async function buildCoverageDocument(
     ...(report.target ? { target: { name: report.target.name, line: report.target.line } } : {}),
     line: report.line,
     ...(report.decision ? { decision: report.decision } : {}),
+    ...(report.instruction ? { instruction: report.instruction } : {}),
     notes: report.notes ?? [],
     files,
   };

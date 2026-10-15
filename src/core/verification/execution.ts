@@ -51,13 +51,23 @@ export async function runTestStage(
   }
 
   if (verification !== "passed" && verification !== "notApplicable") {
+    // Que la verificación no haya podido correr no dice que la prueba esté
+    // mal: falta algo en la máquina o en el proyecto, y eso lo explica el
+    // bloque de la verificación.
     return {
       status: "notRun",
-      blocker: {
-        code: NEEDS_VERIFICATION,
-        message: "La prueba no pasó la verificación.",
-        remediation: "Cuando la verificación pase, la ejecución corre sola.",
-      },
+      blocker:
+        verification === "notRun"
+          ? {
+              code: NEEDS_VERIFICATION,
+              message: "La verificación no se pudo hacer.",
+              remediation: "Resolvé lo que indica la verificación y volvé a intentarla: la ejecución corre sola al pasar.",
+            }
+          : {
+              code: NEEDS_VERIFICATION,
+              message: "La prueba no pasó la verificación.",
+              remediation: "Cuando la verificación pase, la ejecución corre sola.",
+            },
     };
   }
 

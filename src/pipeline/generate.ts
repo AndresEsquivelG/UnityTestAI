@@ -2,6 +2,7 @@ import * as path from "path";
 import {
   supportsDependencyDetection,
   supportsSchemaExtension,
+  supportsUnitFacts,
 } from "../core/contracts";
 import type {
   ArtifactSpec,
@@ -123,6 +124,16 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
 
   // ── OP-06: código de la unidad ───────────────────────────────────────────
   const targetCode = await readTargetCode(adapter, project, editor, targetLocation);
+
+  // ── OP-18: ficha de la unidad, leída del código ──────────────────────────
+  // Sale del archivo entero, antes de que ningún agente lo recorte. Se suma
+  // al contexto después del validador de contexto (ver más abajo), así que
+  // ningún modelo la recorta ni la reescribe.
+  const unitFacts = describeUnitOrNothing(adapter, targetCode, target);
+  if (supportsUnitFacts(adapter)) {
+    // También vacía: así no queda a la vista la ficha de una corrida anterior.
+    saveAgentOutput(outputRoot, "unit-facts", unitFacts);
+  }
 
   // ── OP-08: perfil con el que se componen las plantillas neutras ──────────
   // Se pide una sola vez por corrida: depende del proyecto descubierto y ese
@@ -320,7 +331,7 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
     );
   }
 
-  const assembledContext = ctxValResult.output;
+  const assembledContext = withUnitFacts(ctxValResult.output, unitFacts.facts);
 
   // ── Step 2.7: Code Analyzer ───────────────────────────────────────────────
   const codeAnalyzerAgent = "Code Analyzer";
@@ -443,6 +454,30 @@ function samePath(a: string, b: string): boolean {
     return left.toLowerCase() === right.toLowerCase();
   }
   return left === right;
+}
+
+/**
+ * La ficha de la unidad, si el adaptador la ofrece. Complementa al contexto:
+ * si falla, se sigue sin ella y el error queda en el volcado.
+ */
+function describeUnitOrNothing(
+  adapter: EcosystemAdapter,
+  code: string,
+  target: UnitTarget,
+): { readonly facts: string; readonly error?: string } {
+  if (!supportsUnitFacts(adapter)) {
+    return { facts: "" };
+  }
+  try {
+    return { facts: adapter.describeUnit(code, target).trim() };
+  } catch (err: any) {
+    return { facts: "", error: err?.message ?? String(err) };
+  }
+}
+
+/** El contexto con la ficha al final, después de todo lo que armaron los agentes. */
+function withUnitFacts(context: string, facts: string): string {
+  return facts.length === 0 ? context : `${context}\n\n${facts}`;
 }
 
 /** Detalle de un validador que encontró problemas y no trajo corrección. */
