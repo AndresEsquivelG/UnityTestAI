@@ -232,11 +232,36 @@ describe("ficha de la clase de Java", () => {
       assert.ok(!calls.includes("nadieLoLlama"), calls);
     });
 
-    it("de un no privado trae el código si es corto", () => {
+    it("de un no privado trae el código si es corto, marcado como solo de referencia", () => {
       const facts = factsOf(ABSTRACT_DOCUMENT, "AbstractDocument", "children");
       const calls = callsSection(facts, "AbstractDocument");
 
-      assert.match(calls, /public Object get\(String key\) — its code:\n {6}public Object get\(String key\) \{\n {8}return documentProperties\.get\(key\);\n {6}\}/);
+      // El generador copió este código en la subclase anónima, y `get` lee un
+      // campo privado: la marca dice que ya está implementado y que no se copia.
+      assert.match(calls, /public Object get\(String key\) — already implemented in AbstractDocument and runs as is: do not override it or copy its code into the test \(it can use private fields the test cannot reach\)\. Its code, for reference only:\n {6}public Object get\(String key\) \{\n {8}return documentProperties\.get\(key\);\n {6}\}/);
+    });
+
+    it("de un no privado largo no trae el código, pero dice igual que no se sobrescribe", () => {
+      const body = Array.from({ length: 12 }, (_, index) => `        int v${index} = ${index};`);
+      const facts = factsOf(
+        [
+          "public abstract class Informe {",
+          "    public String titulo() {",
+          "        return armar();",
+          "    }",
+          "    public String armar() {",
+          ...body,
+          '        return "x";',
+          "    }",
+          "}",
+        ],
+        "Informe",
+        "titulo"
+      );
+      const calls = callsSection(facts, "Informe");
+
+      assert.match(calls, /public String armar\(\) — already implemented in Informe and runs as is: do not override it or copy its code into the test\.$/);
+      assert.ok(!calls.includes("int v0"), calls);
     });
 
     it("cuenta this.x(), Clase.x() y this::x, pero no las llamadas sobre otros objetos ni los new", () => {
@@ -287,7 +312,7 @@ describe("ficha de la clase de Java", () => {
       );
 
       assert.match(facts, /The method under test: public void agregar\(Item item\)\n/);
-      assert.match(callsSection(facts, "Carrito"), /public void agregar\(Item item, int cantidad\) — its code:/);
+      assert.match(callsSection(facts, "Carrito"), /public void agregar\(Item item, int cantidad\) — already implemented in Carrito .* Its code, for reference only:/);
     });
 
     it("nombra lo que llama sin que la clase lo declare: heredado o importado", () => {

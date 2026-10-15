@@ -186,6 +186,9 @@ COMPUTED GETTERS — a getter that computes its value has NO field with its name
   /**
    * Confirmar la firma del constructor antes de escribir la llamada. En Java
    * la versión del lenguaje también importa: `List.of` no existe en Java 8.
+   * Y una colección fija compila pero revienta al ejecutar: en la prueba de
+   * `children`, `new AbstractDocument(Map.of())` y después `put`. Ese error no
+   * lo ve la corrección automática, que solo actúa al compilar.
    */
   generatorConstructorParams: `E. CONSTRUCTOR PARAMETERS — MANDATORY PRE-FLIGHT before writing any setup code:
 
@@ -202,7 +205,13 @@ COMPUTED GETTERS — a getter that computes its value has NO field with its name
    Rules for complex constructor arguments:
    - Build the minimum valid argument — only what the constructor's validations need
    - If the constructor checks its arguments (Objects.requireNonNull, if (...) throw), satisfy those checks
-   - Build collections with \`new ArrayList<>(Arrays.asList(...))\` — use \`List.of(...)\` only if the context already does (it needs Java 9+)`,
+   - Build collections with \`new ArrayList<>(Arrays.asList(...))\` — use \`List.of(...)\` only if the context already does (it needs Java 9+)
+   - A collection that the code may modify (put, add, remove — directly or through a method the test calls) MUST be mutable:
+     pass \`new HashMap<>()\`, \`new ArrayList<>()\` or \`new HashSet<>()\`. \`Map.of()\`, \`List.of()\`, \`Set.of()\`,
+     \`Collections.emptyMap()\` and \`Arrays.asList(...)\` are fixed: put/add throws UnsupportedOperationException when the test runs.
+     WRONG:  new Catalog(Map.of())        ← compiles, but Catalog.put writes into that map → UnsupportedOperationException
+     CORRECT: new Catalog(new HashMap<>())
+     When unsure whether it is modified, use the mutable one.`,
 
   /** El cierre nombra los campos inyectados, así que se va con ellos. */
   generatorScanClosing: `Write down the list of private members and injected fields before continuing.`,

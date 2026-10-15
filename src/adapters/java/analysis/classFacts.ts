@@ -359,10 +359,17 @@ function describeCalled(
     ];
   }
 
+  // El código se muestra para que el modelo sepa qué devuelve, no para que lo
+  // copie: en la prueba de `children` el generador lo pegó en la subclase
+  // anónima, y `get` lee un campo privado que la prueba no puede tocar.
+  const inherited = `already implemented in ${outline.name} and runs as is: do not override it or copy its code into the test`;
   if (text.split("\n").length <= SHORT_BODY_LINES) {
-    return [`  ${member.signature} — its code:`, ...indentBody(text)];
+    return [
+      `  ${member.signature} — ${inherited} (it can use private fields the test cannot reach). Its code, for reference only:`,
+      ...indentBody(text),
+    ];
   }
-  return [`  ${member.signature}`];
+  return [`  ${member.signature} — ${inherited}.`];
 }
 
 /**

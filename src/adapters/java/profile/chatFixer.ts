@@ -28,7 +28,9 @@ export const CHAT_FIXER_FRAGMENTS = {
 
   /**
    * Las dos causas de prueba imposible en Java juntas: lo que la prueba no
-   * puede controlar, y los tipos que no se construyen con `new`.
+   * puede controlar, y los tipos que no se construyen con `new`. El cierre
+   * nombra el «has private access» de la prueba de `children`: el corrector
+   * creyó que sobrescribir `get` era el arreglo y devolvió el mismo archivo.
    */
   fixerUntestableBranches: `0.6. UNTESTABLE BRANCHES:
    Code that reads System.in, depends on System.getenv(...) or calls System.exit(...) cannot be exercised
@@ -44,7 +46,12 @@ export const CHAT_FIXER_FRAGMENTS = {
    If the reference context ends with a CLASS FACTS block, it was read from the source code: create the instance
    exactly as its "How to create an instance" line says, and never @Override or call a method of that class
    that its method list does not contain. "method does not override or implement a method from a supertype"
-   means that method does not exist: remove it, do not rename it.`,
+   means that method does not exist: remove it, do not rename it.
+   When that line says EMPTY body, the anonymous subclass must stay empty: delete every method inside it.
+   "<field> has private access" inside an anonymous subclass means the test copied code from the class:
+   delete that method from the subclass, because the class already implements it. Only when it is one of the
+   abstract methods that CLASS FACTS lists, keep it and rewrite its body without that field.
+   Overriding the method again is NOT a fix: the same line fails again.`,
 
   /** El constructor que no existe, ahora como instrucción de corrección. */
   fixerConstructorArgs: `0.75. CONSTRUCTOR PARAMETERS:
