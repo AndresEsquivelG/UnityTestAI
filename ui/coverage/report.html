@@ -147,6 +147,14 @@
           return metric.covered + " de " + metric.total + " " + counted;
         }
 
+        // Sin dato, la herramienta no la mide; con total cero, midió y no
+        // había nada que cubrir.
+        function optionalCard(label, metric, counted, nothingToCover) {
+          if (!metric) return card(label, "No disponible", "La herramienta no la mide");
+          if (metric.total === 0) return card(label, "—", nothingToCover);
+          return card(label, percent(metric), counts(metric, counted));
+        }
+
         function card(label, value, detail) {
           var node = el("div", "card");
           node.appendChild(el("div", "card__label", label));
@@ -170,9 +178,10 @@
         );
         cards.appendChild(card("Archivo", percent(data.line), counts(data.line, "líneas")));
         cards.appendChild(
-          data.decision
-            ? card("Decisión", percent(data.decision), counts(data.decision, "decisiones"))
-            : card("Decisión", "No disponible", "La herramienta no la mide")
+          optionalCard("Decisión del archivo", data.decision, "decisiones", "No tiene condiciones")
+        );
+        cards.appendChild(
+          optionalCard("Instrucción del archivo", data.instruction, "instrucciones", "No tiene código")
         );
         root.appendChild(cards);
 
