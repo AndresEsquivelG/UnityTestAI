@@ -72,7 +72,9 @@ These branches are untestable in a plain unit test and must be omitted entirely.
    If every constructor of XYZ is private → FAIL (it must be created through its static factory method).
    WRONG: new Shape()  when \`public abstract class Shape\`
    CORRECT: new Shape() { @Override public double area() { return 1.0; } }  or a concrete subclass from the context
-   FIX: use a concrete subclass, an anonymous class, a lambda (functional interface) or the static factory.`,
+   FIX: use a concrete subclass, an anonymous class, a lambda (functional interface) or the static factory.
+   If the reference context ends with a CLASS FACTS block, it was read from the source code and is exact:
+   an anonymous subclass that overrides a method missing from its method list → FAIL (that method does not exist).`,
 
   /**
    * El constructor que no existe es un error de compilación, con este mensaje

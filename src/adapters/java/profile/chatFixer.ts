@@ -40,7 +40,11 @@ export const CHAT_FIXER_FRAGMENTS = {
    Interfaces and abstract classes → use a concrete subclass from the context, an anonymous class or a lambda.
    Classes whose constructors are all private → use their static factory method (e.g., \`Money.of(10)\`).
    \`new PaymentGateway()\` when PaymentGateway is an interface → compile error.
-   CORRECT: PaymentGateway gateway = amount -> true;  (functional interface) or new PaymentGateway() { ... }`,
+   CORRECT: PaymentGateway gateway = amount -> true;  (functional interface) or new PaymentGateway() { ... }
+   If the reference context ends with a CLASS FACTS block, it was read from the source code: create the instance
+   exactly as its "How to create an instance" line says, and never @Override or call a method of that class
+   that its method list does not contain. "method does not override or implement a method from a supertype"
+   means that method does not exist: remove it, do not rename it.`,
 
   /** El constructor que no existe, ahora como instrucción de corrección. */
   fixerConstructorArgs: `0.75. CONSTRUCTOR PARAMETERS:

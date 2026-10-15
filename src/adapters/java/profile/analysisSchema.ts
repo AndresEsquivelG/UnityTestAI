@@ -93,7 +93,11 @@ function formatJavaAnalysis(analysis: unknown): string {
   }
 
   if (preFlightChecklist) {
-    lines.push("\n━━ PRE-FLIGHT CHECKLIST — use as ground truth, do NOT re-derive ━━");
+    // La ficha de la clase (OP-18) sale del código y no de un modelo: si el
+    // analizador se equivocó, es ella la que tiene razón.
+    lines.push(
+      "\n━━ PRE-FLIGHT CHECKLIST — use as ground truth, do NOT re-derive. Only the CLASS FACTS block outranks it ━━"
+    );
 
     if (preFlightChecklist.typeInstantiations.length > 0) {
       lines.push("\nType Instantiations:");

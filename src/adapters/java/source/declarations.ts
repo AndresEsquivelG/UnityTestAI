@@ -216,7 +216,8 @@ function braceBalance(masked: string, from: number, to: number): number {
   return balance;
 }
 
-function findClosing(masked: string, openIndex: number, open: string, close: string): number {
+/** Posición del cierre que corresponde a la apertura dada, o -1 si no cierra. */
+export function findClosing(masked: string, openIndex: number, open: string, close: string): number {
   if (openIndex === -1) {
     return -1;
   }

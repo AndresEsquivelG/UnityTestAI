@@ -12,8 +12,15 @@ export const TEST_GENERATOR_FRAGMENTS = {
   /** El marco con su motor: JUnit 5 corre sobre la plataforma Jupiter. */
   generatorTestFramework: `JUnit 5 (Jupiter)`,
 
-  /** Lo que el analizador deja resuelto, cada asunto en términos de Java. */
-  generatorPreFlightItems: `• Type Instantiations → exact \`new\` vs static factory vs lambda/anonymous subclass for EVERY type, including helpers
+  /**
+   * Lo que el analizador deja resuelto, cada asunto en términos de Java. La
+   * ficha de la clase va primero: la plantilla dice que el checklist manda, y
+   * la ficha es lo único que manda sobre él (OP-18).
+   */
+  generatorPreFlightItems: `• CLASS FACTS block at the end of the context → read from the source code by the tool, so it outranks this checklist.
+  Where they disagree — for example, the checklist says "concrete class" and the facts say "abstract class" — follow the facts,
+  and create the instance exactly as its "How to create an instance" line says
+• Type Instantiations → exact \`new\` vs static factory vs lambda/anonymous subclass for EVERY type, including helpers
 • Computed Getters → which underlying fields to set instead of using getDeclaredField on a getter
 • Untestable Branches → branches to OMIT entirely (no assertTrue(true), no placeholder tests)
 • Required Imports → exact \`import ...;\` lines for project types from other packages
