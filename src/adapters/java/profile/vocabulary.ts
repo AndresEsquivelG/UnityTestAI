@@ -1,4 +1,5 @@
 import type { ProjectModel, PromptVocabulary } from "../../../core/contracts";
+import { BUILD_TOOL_NAMES, type BuildTool } from "../discovery/layout";
 
 /**
  * Vocabulario obligatorio: las palabras que caen dentro de las frases de las
@@ -25,13 +26,10 @@ export function javaVocabulary(project: ProjectModel): PromptVocabulary {
   };
 }
 
+/** Sin herramienta reconocida queda «Java»: «… test assistant for Java». */
 function buildToolName(project: ProjectModel): string {
-  switch (project.adapterData?.buildTool) {
-    case "maven":
-      return "Maven";
-    case "gradle":
-      return "Gradle";
-    default:
-      return "Java";
-  }
+  const tool = project.adapterData?.buildTool;
+  return typeof tool === "string" && Object.prototype.hasOwnProperty.call(BUILD_TOOL_NAMES, tool)
+    ? BUILD_TOOL_NAMES[tool as BuildTool]
+    : "Java";
 }

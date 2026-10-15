@@ -7,15 +7,23 @@ import {
   absolutePath,
   findBuildDescriptor,
   isDirectory,
+  isSupportedBuildTool,
 } from "../discovery/layout";
 
 /**
  * OP-02 — Detección de aplicabilidad del ecosistema Java.
  *
- * Hacen falta dos marcadores: el descriptor de Maven o de Gradle en la raíz, y
- * la carpeta `src/main/java`. Con el descriptor solo, el proyecto puede ser de
- * varios módulos o de otro lenguaje de la JVM, como Kotlin, y el adaptador no
- * sabría dónde están las fuentes.
+ * El marcador que no puede faltar es la carpeta `src/main/java`: sin ella el
+ * adaptador no sabría dónde están las fuentes ni dónde va la prueba. Con el
+ * descriptor de Maven o de Gradle al lado, el proyecto es de los que el
+ * adaptador sabe compilar y ejecutar.
+ *
+ * Sin ese descriptor también se reclama, si hay fuentes: un proyecto de Ant,
+ * de Bazel o sin herramienta que siga la convención. La prueba se genera
+ * igual, y la compilación avisa que solo sabe hacerlo con Maven o Gradle. Con
+ * menos confianza, porque una carpeta así sola no dice tanto como un
+ * descriptor. Un descriptor sin `src/main/java` no alcanza: el proyecto puede
+ * ser de varios módulos o de otro lenguaje de la JVM, como Kotlin.
  */
 
 const CONFIDENCE = {
@@ -23,6 +31,8 @@ const CONFIDENCE = {
   withSources: 0.95,
   /** Descriptor y jerarquía principal todavía vacía: un proyecto recién creado. */
   emptyMainRoot: 0.8,
+  /** Fuentes en la jerarquía principal sin descriptor de Maven ni de Gradle. */
+  withoutSupportedDescriptor: 0.7,
 };
 
 const NOT_APPLICABLE: ApplicabilityResult = { applicable: false, confidence: 0, evidence: [] };
@@ -30,20 +40,24 @@ const NOT_APPLICABLE: ApplicabilityResult = { applicable: false, confidence: 0, 
 export async function detectJavaProject(context: DetectionContext): Promise<ApplicabilityResult> {
   const { rootPath } = context;
 
-  const descriptor = await findBuildDescriptor(rootPath);
-  if (!descriptor) {
-    return NOT_APPLICABLE;
-  }
-
   const mainRoot = absolutePath(rootPath, MAIN_ROOT);
   if (!(await isDirectory(mainRoot))) {
     return NOT_APPLICABLE;
   }
 
-  const evidence = [descriptor.file, `${MAIN_ROOT}/`];
-  const confidence = (await containsSourceFile(mainRoot))
-    ? CONFIDENCE.withSources
-    : CONFIDENCE.emptyMainRoot;
+  const descriptor = await findBuildDescriptor(rootPath);
+  const hasSources = await containsSourceFile(mainRoot);
+
+  let confidence: number;
+  if (descriptor && isSupportedBuildTool(descriptor.tool)) {
+    confidence = hasSources ? CONFIDENCE.withSources : CONFIDENCE.emptyMainRoot;
+  } else if (hasSources) {
+    confidence = CONFIDENCE.withoutSupportedDescriptor;
+  } else {
+    return NOT_APPLICABLE;
+  }
+
+  const evidence = descriptor ? [descriptor.file, `${MAIN_ROOT}/`] : [`${MAIN_ROOT}/`];
 
   // El archivo abierto se registra pero no cambia la confianza: el veredicto
   // lo dan los marcadores del proyecto.

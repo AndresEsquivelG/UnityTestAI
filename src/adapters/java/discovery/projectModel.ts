@@ -35,9 +35,10 @@ export async function buildJavaProjectModel(
     sources.push(...(await collectSources(absolutePath(rootPath, root.relativePath), root)));
   }
 
-  // De la herramienta de construcción dependen la compilación y la ejecución,
-  // y el perfil la nombra. Averiguarla aquí evita volver a mirar la raíz en
-  // cada operación.
+  // De la herramienta de construcción dependen la compilación, la ejecución
+  // y la cobertura, y el perfil la nombra. Averiguarla aquí evita volver a
+  // mirar la raíz en cada operación. Sin ninguna queda `"none"`, para que la
+  // compilación pueda decir que el proyecto no usa ninguna.
   const descriptor = await findBuildDescriptor(rootPath);
 
   return {
@@ -45,7 +46,9 @@ export async function buildJavaProjectModel(
     ecosystemId,
     sourceRoots,
     sources,
-    adapterData: descriptor ? { buildTool: descriptor.tool } : undefined,
+    adapterData: descriptor
+      ? { buildTool: descriptor.tool, buildFile: descriptor.file }
+      : { buildTool: "none" },
   };
 }
 
