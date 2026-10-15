@@ -5,6 +5,7 @@ import * as fsp from "fs/promises";
 import * as path from "path";
 import { checkGeneratedTest, generateTest, type Ask, type PipelineEvent } from "../pipeline";
 import { JavaAdapter } from "../adapters/java/javaAdapter";
+import { fakeBuildToolchain, passingReport } from "./support/javaBuildOutputs";
 import { createJavaFixture, type JavaFixture } from "./support/javaFixture";
 
 /**
@@ -15,8 +16,27 @@ import { createJavaFixture, type JavaFixture } from "./support/javaFixture";
  * operaciones de Java de punta a punta. El resolutor pide la dependencia con
  * su nombre calificado, el analizador devuelve los campos propios de Java y
  * el generador los recibe, y la prueba queda escrita en la carpeta de su
- * paquete con la línea `package` correcta.
+ * paquete con la línea `package` correcta. Después la compilan, ejecutan y
+ * miden un Maven de mentira, o avisan que no pueden en un proyecto de Ant.
  */
+
+const TEST_CLASS = "com.tienda.UTIA_libreto_Carrito_agregar_Test";
+
+/** Informe de JaCoCo armado a mano para `Carrito`: una sobrecarga cubierta y otra no. */
+const CARRITO_JACOCO = `<?xml version="1.0" encoding="UTF-8"?>
+<report name="tienda">
+<package name="com/tienda">
+<class name="com/tienda/Carrito" sourcefilename="Carrito.java">
+<method name="agregar" desc="(Lcom/tienda/modelo/Item;)V" line="19"/>
+<method name="agregar" desc="(Lcom/tienda/modelo/Item;I)V" line="26"/>
+</class>
+<sourcefile name="Carrito.java">
+<line nr="19" mi="0" ci="4" mb="0" cb="0"/>
+<line nr="26" mi="0" ci="3" mb="1" cb="1"/>
+<line nr="27" mi="5" ci="0" mb="0" cb="0"/>
+</sourcefile>
+</package>
+</report>`;
 
 const SLICE = [
   "package com.tienda;",
@@ -191,26 +211,101 @@ describe("pipeline entero sobre el adaptador de Java", () => {
     assert.ok(!prompt.includes("{{"), "quedó un marcador sin componer");
   });
 
-  it("compilación, ejecución y cobertura se informan como no aplicables", async () => {
+  it("la ficha de la clase llega al final del contexto de cada agente, y al corrector", async () => {
     const model = scriptedModel();
     const test = await generate(model.ask);
-    const events: PipelineEvent[] = [];
 
+    // Después del validador de contexto: él no la ve, así que no la puede tocar.
+    assert.ok(!(model.prompts.get("Context Validator") ?? "").includes("CLASS FACTS"));
+    for (const agent of ["Code Analyzer", "Test Generator", "Test Validator"]) {
+      const prompt = model.prompts.get(agent) ?? "";
+      assert.match(prompt, /━━ CLASS FACTS/, agent);
+      assert.match(prompt, /The method under test: public void agregar\(Item item\)/, agent);
+    }
+
+    // El corrector compone su prompt con este contexto.
+    assert.match(test.assembledContext, /━━ CLASS FACTS[\s\S]*Methods of Carrito that `agregar` calls:/);
+    assert.ok(
+      test.assembledContext.indexOf("━━ CLASS FACTS") >
+        test.assembledContext.indexOf("public record Item(String nombre, double precio)"),
+      "la ficha no quedó después de las dependencias"
+    );
+
+    const generatorPrompt = model.prompts.get("Test Generator") ?? "";
+    assert.match(generatorPrompt, /Only the CLASS FACTS block outranks it/);
+    assert.match(generatorPrompt, /• CLASS FACTS block at the end of the context/);
+
+    const saved = JSON.parse(
+      fs.readFileSync(path.join(fixture.projectRoot, "AgentOutputs", "unit-facts", "unit-facts-output.json"), "utf8")
+    );
+    assert.match(saved.facts, /^━━ CLASS FACTS/);
+  });
+
+  async function check(adapter: JavaAdapter, test: Awaited<ReturnType<typeof generate>>, ask: Ask) {
+    const events: PipelineEvent[] = [];
     await checkGeneratedTest({
-      adapter: new JavaAdapter(),
+      adapter,
       test,
       className: "Carrito",
       methodName: "agregar",
-      ask: model.ask,
+      ask,
       tokenTotals: () => ({ inputTokens: 0, outputTokens: 0 }),
       coverageTemplate: COVERAGE_TEMPLATE,
       onEvent: (event) => events.push(event),
     });
+    return events;
+  }
 
-    const statuses = events.map((event) =>
-      event.kind === "verified" ? event.status : "presentation" in event ? event.presentation.status : event.kind
+  /** El estado que mostró cada etapa, en orden, sin los avisos de «corriendo». */
+  const shown = (events: readonly PipelineEvent[]) =>
+    events.flatMap((event) =>
+      event.kind === "verified"
+        ? []
+        : "presentation" in event
+          ? [`${event.presentation.stageName}: ${event.presentation.status}`]
+          : []
     );
-    assert.deepEqual(statuses, ["notApplicable", "notApplicable", "notApplicable", "notApplicable"]);
+
+  it("compila, ejecuta y mide la prueba con la herramienta del proyecto", async () => {
+    const model = scriptedModel();
+    const test = await generate(model.ask);
+    const toolchain = fakeBuildToolchain({
+      respond: (args) =>
+        args.includes("test-compile")
+          ? { output: "[INFO] BUILD SUCCESS" }
+          : {
+              files: {
+                [`target/surefire-reports/TEST-${TEST_CLASS}.xml`]: passingReport(TEST_CLASS),
+                "target/site/jacoco/jacoco.xml": CARRITO_JACOCO,
+              },
+            },
+    });
+
+    const events = await check(new JavaAdapter({ toolchain }), test, model.ask);
+
+    assert.deepEqual(shown(events), ["Compilación: passed", "Ejecución: passed", "Cobertura: measured"]);
+    assert.equal(toolchain.runs.length, 2);
+    const coverage = events.find((event) => event.kind === "coverage");
+    assert.ok(coverage && coverage.kind === "coverage");
+    assert.equal(coverage.presentation.summary, "método agregar, 66,7 % de líneas (2 de 3).");
+    assert.ok(coverage.presentation.details?.includes("Decisión del archivo: 50 % de decisiones (1 de 2)."));
+    assert.ok(fs.existsSync(path.join(fixture.projectRoot, "AgentOutputs", "coverage", "coverage-report.html")));
+  });
+
+  it("con Ant, la prueba se genera y las tres etapas dicen que solo saben hacerlo con Maven o Gradle", async () => {
+    await fsp.rm(path.join(fixture.projectRoot, "pom.xml"));
+    await fsp.writeFile(path.join(fixture.projectRoot, "build.xml"), "<project/>", "utf8");
+    const model = scriptedModel();
+    const test = await generate(model.ask);
+    const toolchain = fakeBuildToolchain({});
+
+    const events = await check(new JavaAdapter({ toolchain }), test, model.ask);
+
+    assert.deepEqual(shown(events), ["Compilación: notRun", "Ejecución: notRun", "Cobertura: notRun"]);
+    const summaries = events.flatMap((event) => ("presentation" in event ? [event.presentation.summary] : []));
+    assert.match(summaries[0], /solo puede compilar, ejecutar y medir proyectos que usan Maven o Gradle, y este usa Ant/);
+    assert.equal(summaries[1], "No se ejecutó. La verificación no se pudo hacer.");
+    assert.equal(toolchain.runs.length, 0);
   });
 
   it("sin la carpeta del paquete, se detiene antes de llamar al modelo y dice cuál crear", async () => {

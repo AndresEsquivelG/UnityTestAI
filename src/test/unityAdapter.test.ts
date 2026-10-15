@@ -415,6 +415,7 @@ public static class Utilities
         analysisSchemaExtension: true,
         lifecycle: false,
         dependencyDetection: true,
+        unitFacts: false,
       });
     });
 

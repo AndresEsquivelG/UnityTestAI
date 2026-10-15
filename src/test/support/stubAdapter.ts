@@ -27,6 +27,7 @@ type OptionalOperations = Pick<
   | "prepare"
   | "cleanup"
   | "detectDependencies"
+  | "describeUnit"
 >;
 
 export interface StubAdapterOptions {
@@ -56,6 +57,7 @@ const NO_CAPABILITIES: CapabilityMap = {
   analysisSchemaExtension: false,
   lifecycle: false,
   dependencyDetection: false,
+  unitFacts: false,
 };
 
 const NOT_APPLICABLE: ApplicabilityResult = {

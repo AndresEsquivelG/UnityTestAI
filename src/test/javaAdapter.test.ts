@@ -85,11 +85,29 @@ describe("adaptador de Java", () => {
       }
     });
 
-    it("no reclama fuentes sin descriptor ni un descriptor sin src/main/java", async () => {
+    it("reclama fuentes sin descriptor de Maven ni de Gradle, con menos confianza", async () => {
       const bare = await createJavaFixture({ descriptor: null });
       try {
         const withoutDescriptor = await adapter.detectApplicability({ rootPath: bare.projectRoot });
-        assert.deepEqual(withoutDescriptor, { applicable: false, confidence: 0, evidence: [] });
+        assert.deepEqual(withoutDescriptor, { applicable: true, confidence: 0.7, evidence: ["src/main/java/"] });
+
+        await fsp.writeFile(path.join(bare.projectRoot, "build.xml"), "<project/>", "utf8");
+        const ant = await adapter.detectApplicability({ rootPath: bare.projectRoot });
+        assert.deepEqual(ant, { applicable: true, confidence: 0.7, evidence: ["build.xml", "src/main/java/"] });
+        const model = await adapter.buildProjectModel(bare.projectRoot);
+        assert.deepEqual(model.adapterData, { buildTool: "ant", buildFile: "build.xml" });
+      } finally {
+        await bare.dispose();
+      }
+    });
+
+    it("no reclama src/main/java vacía sin descriptor, ni un descriptor sin src/main/java", async () => {
+      const bare = await createJavaFixture({ descriptor: null });
+      try {
+        await fsp.rm(path.join(bare.projectRoot, "src", "main", "java"), { recursive: true });
+        await fsp.mkdir(path.join(bare.projectRoot, "src", "main", "java"));
+        const empty = await adapter.detectApplicability({ rootPath: bare.projectRoot });
+        assert.deepEqual(empty, { applicable: false, confidence: 0, evidence: [] });
 
         await fsp.writeFile(path.join(bare.projectRoot, "pom.xml"), "<project/>", "utf8");
         await fsp.rm(path.join(bare.projectRoot, "src", "main"), { recursive: true });
@@ -350,6 +368,17 @@ describe("adaptador de Java", () => {
         assert.equal(adapter.getPromptProfile(model).vocabulary.ecosystem, "Gradle");
       } finally {
         await gradle.dispose();
+      }
+
+      const bare = await createJavaFixture({ descriptor: null });
+      try {
+        const none = await adapter.buildProjectModel(bare.projectRoot);
+        assert.equal(adapter.getPromptProfile(none).vocabulary.ecosystem, "Java");
+        await fsp.writeFile(path.join(bare.projectRoot, "MODULE.bazel"), "", "utf8");
+        const bazel = await adapter.buildProjectModel(bare.projectRoot);
+        assert.equal(adapter.getPromptProfile(bazel).vocabulary.ecosystem, "Bazel");
+      } finally {
+        await bare.dispose();
       }
     });
 
