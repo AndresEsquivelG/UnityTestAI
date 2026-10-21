@@ -25,3 +25,17 @@
   border: 1px solid rgba(0, 122, 204, 0.4);
   border-radius: 8px; padding: 8px 12px; font-size: 13px;
 }
+
+/* Ya hay una prueba de esa unidad: se elige entre generar otra o medir esa */
+.existing-test {
+  background: #22313f; color: #d6f0ff;
+  border: 1px solid rgba(0, 122, 204, 0.4);
+  border-radius: 8px; padding: 8px 12px; font-size: 13px;
+  margin: 10px 20px 0 20px;
+}
+.existing-test__file {
+  display: block; margin-top: 4px;
+  font-family: var(--vscode-editor-font-family, monospace); font-size: 12px;
+  word-break: break-all; opacity: 0.85;
+}
+.existing-test__actions { display: flex; gap: 8px; margin-top: 8px; }

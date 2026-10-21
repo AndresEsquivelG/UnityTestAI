@@ -13,8 +13,11 @@ import type { ActiveEcosystem } from "../core/adapters";
 import { readArtifact } from "../core/project";
 import type { VerificationOutcome } from "../core/verification";
 import {
+  checkExistingTest,
   checkGeneratedTest,
+  findExistingTest,
   generateTest,
+  locateExistingTest,
   runAndMeasure,
   type CheckStage,
   type EditorSelection,
@@ -437,6 +440,66 @@ async function handleGenerate(
   }
 }
 
+/**
+ * Compila, ejecuta y mide una prueba que ya está escrita, sin generarla. Deja
+ * el panel con lo mismo que una generación —la prueba, el modelo, la última
+ * verificación y el informe— para que después funcionen los reintentos, el
+ * botón del informe y el corrector del chat.
+ */
+async function handleRunExisting(
+  className: string,
+  methodName: string,
+  model: string,
+  subModel: string | null,
+  panel: vscode.WebviewPanel,
+  ecosystem: ActiveEcosystem,
+) {
+  if (verifyingPanels.has(panel)) {
+    panel.webview.postMessage({ command: "generationError" });
+    vscode.window.showWarningMessage(
+      "Hay una verificación en curso en este panel. Esperá a que termine para ejecutar otra vez.",
+    );
+    return;
+  }
+
+  try {
+    const lookup = await findExistingTest({
+      adapter: ecosystem.adapter,
+      rootPath: ecosystem.rootPath,
+      className,
+      methodName,
+      modelId: model,
+    });
+    if (!lookup.found) {
+      panel.webview.postMessage({ command: "generationError" });
+      vscode.window.showErrorMessage(lookup.reason);
+      return;
+    }
+
+    generationMetaByPanel.set(panel, { className, methodName, model, subModel });
+    tokenTotalsByPanel.set(panel, { inputTokens: 0, outputTokens: 0 });
+    testContextByPanel.set(panel, lookup.test);
+    panel.webview.postMessage({ command: "clearPipeline" });
+    // Sin tiempo ni tokens: no hubo generación.
+    panel.webview.postMessage({ command: "showResult", result: lookup.test.testCode });
+
+    verifyingPanels.add(panel);
+    try {
+      await checkExistingTest({
+        adapter: ecosystem.adapter,
+        test: lookup.test,
+        coverageTemplate: COVERAGE_TEMPLATE,
+        onEvent: (event) => showPipelineEvent(panel, event),
+      });
+    } finally {
+      verifyingPanels.delete(panel);
+    }
+  } catch (err: any) {
+    panel.webview.postMessage({ command: "agentError", message: err.message });
+    vscode.window.showErrorMessage("Error al ejecutar la prueba: " + err.message);
+  }
+}
+
 // ── Webview panel ──────────────────────────────────────────────────────────────
 
 export async function createWebviewPanel(
@@ -523,6 +586,29 @@ export async function createWebviewPanel(
           panel.webview.postMessage({ command: "resetInputs" });
           return;
         }
+
+        // Si ya hay una prueba de esa unidad con ese modelo, se pregunta antes
+        // de generar otra encima: medir la que está no llama al modelo.
+        const existing =
+          typeof message.model === "string"
+            ? locateExistingTest(
+                ecosystem.adapter,
+                project,
+                { className, methodName },
+                location.candidates[0],
+                message.model,
+              )
+            : undefined;
+        if (existing) {
+          panel.webview.postMessage({
+            command: "existingTest",
+            className,
+            methodName,
+            testFile: existing.relativePath,
+          });
+          break;
+        }
+
         panel.webview.postMessage({
           command: "goToStep2",
           className,
@@ -569,6 +655,19 @@ export async function createWebviewPanel(
           message.subModel,
           editor,
           reduceContext,
+          panel,
+          ecosystem,
+        );
+        break;
+      }
+
+      case "runExistingTest": {
+        const { className, methodName } = await collectClassAndMethod(panel);
+        await handleRunExisting(
+          className,
+          methodName,
+          message.model,
+          message.subModel ?? null,
           panel,
           ecosystem,
         );

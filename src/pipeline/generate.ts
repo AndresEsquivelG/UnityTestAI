@@ -460,7 +460,7 @@ function samePath(a: string, b: string): boolean {
  * La ficha de la unidad, si el adaptador la ofrece. Complementa al contexto:
  * si falla, se sigue sin ella y el error queda en el volcado.
  */
-function describeUnitOrNothing(
+export function describeUnitOrNothing(
   adapter: EcosystemAdapter,
   code: string,
   target: UnitTarget,
@@ -476,7 +476,7 @@ function describeUnitOrNothing(
 }
 
 /** El contexto con la ficha al final, después de todo lo que armaron los agentes. */
-function withUnitFacts(context: string, facts: string): string {
+export function withUnitFacts(context: string, facts: string): string {
   return facts.length === 0 ? context : `${context}\n\n${facts}`;
 }
 
@@ -485,7 +485,7 @@ function unfixedIssues(issues: readonly string[]): string {
   return `${issues.length} problema(s) sin corregir: ${issues.join(" | ")}`;
 }
 
-function buildFullContext(
+export function buildFullContext(
   className: string,
   methodName: string,
   targetCode: string,
