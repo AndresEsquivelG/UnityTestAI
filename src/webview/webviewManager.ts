@@ -9,6 +9,8 @@ import {
   generateWithClaude,
   type LLMResult,
 } from "../llm";
+import { artifactModelId, CLAUDE_MODELS, OPENAI_MODELS, type ModelChoice } from "../llm/models";
+import { DEFAULT_OLLAMA_MODEL, listOllamaModels } from "../llm/ollamaModels";
 import type { ActiveEcosystem } from "../core/adapters";
 import { readArtifact } from "../core/project";
 import type { VerificationOutcome } from "../core/verification";
@@ -110,13 +112,65 @@ type ModelProvider = (
   subModel?: string,
 ) => Promise<LLMResult>;
 
+/** El modelo de cada proveedor cuando no se eligió ninguno, como en la configuración JSON. */
+const defaultModels: Record<string, string> = {
+  chatgpt: OPENAI_MODELS[0].id,
+  llamaLocal: DEFAULT_OLLAMA_MODEL,
+  claude: CLAUDE_MODELS[0].id,
+};
+
 const modelProviders: Record<string, ModelProvider> = {
   chatgpt: (messages, subModel) =>
-    generateWithChatGPT(messages, subModel || "gpt-4o-mini"),
-  llamaLocal: (messages) => generateWithOllama(messages),
+    generateWithChatGPT(messages, subModel || defaultModels.chatgpt),
+  llamaLocal: (messages, subModel) =>
+    generateWithOllama(messages, subModel || defaultModels.llamaLocal),
   claude: (messages, subModel) =>
-    generateWithClaude(messages, subModel || "claude-haiku-4-5"),
+    generateWithClaude(messages, subModel || defaultModels.claude),
 };
+
+/**
+ * El modelo con el que se genera: el elegido, o el del proveedor si no se
+ * eligió ninguno. Se resuelve una vez porque también entra en el nombre de la
+ * prueba, y tiene que ser el mismo que el que la escribió.
+ */
+function chosenModel(provider: string, subModel: string | null | undefined): string {
+  return subModel || defaultModels[provider] || "";
+}
+
+/** Un proveedor del menú del panel, con los modelos que se pueden elegir. */
+interface MenuProvider {
+  readonly id: string;
+  readonly name: string;
+  readonly models: readonly ModelChoice[];
+  /** Por qué no hay modelos para elegir. */
+  readonly notice?: string;
+}
+
+/**
+ * El menú de modelos. Los de la nube aparecen si está su clave; los de Ollama
+ * se le preguntan a Ollama cada vez que se abre el panel.
+ */
+async function buildModelMenu(): Promise<MenuProvider[]> {
+  const menu: MenuProvider[] = [];
+  if (process.env.OPENAI_API_KEY) {
+    menu.push({ id: "chatgpt", name: "ChatGPT", models: OPENAI_MODELS });
+  }
+  if (process.env.ANTHROPIC_API_KEY) {
+    menu.push({ id: "claude", name: "Claude", models: CLAUDE_MODELS });
+  }
+
+  const ollama = await listOllamaModels();
+  menu.push(
+    ollama.ok
+      ? {
+          id: "llamaLocal",
+          name: "Ollama",
+          models: ollama.models.map((name) => ({ id: name, label: name })),
+        }
+      : { id: "llamaLocal", name: "Ollama", models: [], notice: ollama.reason },
+  );
+  return menu;
+}
 
 /**
  * Llamada sin historial. Los prompts de los agentes son autocontenidos: el
@@ -392,7 +446,8 @@ async function handleGenerate(
     return;
   }
 
-  generationMetaByPanel.set(panel, { className, methodName, model, subModel });
+  const chosen = chosenModel(model, subModel);
+  generationMetaByPanel.set(panel, { className, methodName, model, subModel: chosen });
 
   const generationStart = Date.now();
   tokenTotalsByPanel.set(panel, { inputTokens: 0, outputTokens: 0 });
@@ -406,10 +461,10 @@ async function handleGenerate(
       rootPath: ecosystem.rootPath,
       className,
       methodName,
-      modelId: model,
+      modelId: artifactModelId(model, chosen),
       reduceContext,
       editor,
-      ask: (prompt) => askOnce(provider, prompt, panel, subModel ?? undefined),
+      ask: (prompt) => askOnce(provider, prompt, panel, chosen),
       onEvent: (event) => showPipelineEvent(panel, event),
     });
 
@@ -462,13 +517,14 @@ async function handleRunExisting(
     return;
   }
 
+  const chosen = chosenModel(model, subModel);
   try {
     const lookup = await findExistingTest({
       adapter: ecosystem.adapter,
       rootPath: ecosystem.rootPath,
       className,
       methodName,
-      modelId: model,
+      modelId: artifactModelId(model, chosen),
     });
     if (!lookup.found) {
       panel.webview.postMessage({ command: "generationError" });
@@ -476,7 +532,7 @@ async function handleRunExisting(
       return;
     }
 
-    generationMetaByPanel.set(panel, { className, methodName, model, subModel });
+    generationMetaByPanel.set(panel, { className, methodName, model, subModel: chosen });
     tokenTotalsByPanel.set(panel, { inputTokens: 0, outputTokens: 0 });
     testContextByPanel.set(panel, lookup.test);
     panel.webview.postMessage({ command: "clearPipeline" });
@@ -522,12 +578,9 @@ export async function createWebviewPanel(
     },
   );
 
-  const models: { id: string; name: string; type?: string }[] = [];
-  if (process.env.OPENAI_API_KEY)
-    models.push({ id: "chatgpt", name: "ChatGPT", type: "direct" });
-  if (process.env.ANTHROPIC_API_KEY)
-    models.push({ id: "claude", name: "Claude", type: "direct" });
-  models.push({ id: "llamaLocal", name: "Llama Local", type: "direct" });
+  // Sin esperarlo: si Ollama está cerrado, tarda unos segundos en darse por
+  // cerrado, y el panel tiene que ir cargando mientras tanto.
+  const menu = buildModelMenu();
 
   // Ecosistema detectado, para que la interfaz diga contra qué se va a generar.
   // Sale del descriptor (OP-01) y de la evidencia de la detección (OP-02): el
@@ -560,7 +613,9 @@ export async function createWebviewPanel(
   html = html.replace("@@scriptUri", scriptUri.toString());
   panel.webview.html = html;
 
-  panel.webview.postMessage({ command: "setModels", models });
+  void menu.then((models) =>
+    panel.webview.postMessage({ command: "setModels", models }),
+  );
   panel.webview.postMessage({
     command: "setEcosystem",
     ecosystem: ecosystemInfo,
@@ -596,7 +651,10 @@ export async function createWebviewPanel(
                 project,
                 { className, methodName },
                 location.candidates[0],
-                message.model,
+                artifactModelId(
+                  message.model,
+                  chosenModel(message.model, message.subModel),
+                ),
               )
             : undefined;
         if (existing) {
@@ -618,11 +676,11 @@ export async function createWebviewPanel(
       }
 
       case "webviewReady": {
-        panel.webview.postMessage({ command: "setModels", models });
         panel.webview.postMessage({
           command: "setEcosystem",
           ecosystem: ecosystemInfo,
         });
+        panel.webview.postMessage({ command: "setModels", models: await menu });
         break;
       }
 

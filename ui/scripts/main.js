@@ -3,7 +3,7 @@
 import { toggleElement } from "./domUtils.js";
 import { renderResult } from "./managers/resultRendererManager.js";
 import { getStepperState, setStepperState, applyStepUI } from "./stepper.js";
-import { setModels, setSubModels, getSelectedModel } from "./modelMenu.js";
+import { setModels, getSelectedModel } from "./modelMenu.js";
 import { initJsonLoader } from "./managers/jsonLoaderManager.js";
 import {
   showChatUI,
@@ -136,14 +136,16 @@ stepInput.addEventListener("keydown", (e) => {
     setStepperState(1, undefined, val);
     const { methodNameVal } = getStepperState();
 
-    // Enviar los datos (clase y método) al backend para validación. El modelo
-    // va también: entra en el nombre del archivo de la prueba, y con él se
-    // sabe si ya hay una.
+    // Enviar los datos (clase y método) al backend para validación. El
+    // proveedor y el modelo van también: entran en el nombre del archivo de la
+    // prueba, y con ellos se sabe si ya hay una.
+    const { selectedModel, selectedSubModel } = getSelectedModel();
     vscode.postMessage({
       command: "validateInputs",
       className: classNameVal.trim(),
       methodName: methodNameVal.trim(),
-      model: getSelectedModel().selectedModel,
+      model: selectedModel,
+      subModel: selectedSubModel,
     });
   }
 });
@@ -451,20 +453,7 @@ window.addEventListener("message", (event) => {
       setModels(
         message.models,
         document.getElementById("modelMenuContainer"),
-        "modelBtn",
-        vscode
-      );
-      break;
-
-    /* ----------------------------------------
-      Poblar submodelos (OpenRouter)
-    ---------------------------------------- */
-    case "setSubModels":
-      setSubModels(
-        message.subModels,
-        document.getElementById("openRouterSubmenu"),
-        "modelBtn",
-        vscode
+        "modelBtn"
       );
       break;
 

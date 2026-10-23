@@ -14,8 +14,9 @@
 	 * hermana de la suya, así que `npm run test:unit` las copia a
 	 * `out-test/prompts` después de compilar.
 	 *
-	 * De `src/llm` entra solo el cliente de Claude, por la elección de la
-	 * configuración de razonamiento según el modelo.
+	 * De `src/llm` entran el cliente de Claude, por la elección de la
+	 * configuración de razonamiento según el modelo, y las listas de modelos
+	 * del panel, que no dependen de ningún SDK.
 	 */
 	"extends": "./tsconfig.json",
 	"compilerOptions": {
@@ -32,6 +33,8 @@
 		"src/prompts/**/*.ts",
 		"src/agents/**/*.ts",
 		"src/utils/**/*.ts",
-		"src/llm/claude.ts"
+		"src/llm/claude.ts",
+		"src/llm/models.ts",
+		"src/llm/ollamaModels.ts"
 	]
 }

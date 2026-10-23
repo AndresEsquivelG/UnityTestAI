@@ -334,6 +334,79 @@ describe("ficha de la clase de Java", () => {
     });
   });
 
+  describe("getClass()", () => {
+    /** Una clase con `toString` que llama a un privado que usa `llamada`. */
+    function documento(declaration: string, llamada: string, extra: string[] = []): string[] {
+      return [
+        `${declaration} {`,
+        "    protected Documento(Map<String, Object> props) { }",
+        ...extra,
+        "    @Override",
+        "    public String toString() {",
+        "        return armar();",
+        "    }",
+        "    private String armar() {",
+        `        return ${llamada} + "[]";`,
+        "    }",
+        "}",
+      ];
+    }
+
+    const AVISO = /getClass\(\) — the test's instance is an anonymous subclass, not Documento itself: getClass\(\)\.getName\(\) returns the test class name followed by \$1/;
+
+    it("en una abstracta avisa que el nombre es el de la subclase anónima, también a través de un privado", () => {
+      const facts = factsOf(documento("public abstract class Documento", "getClass().getName()"), "Documento", "toString");
+      const calls = callsSection(facts, "Documento");
+
+      assert.match(calls, /not declared in Documento .*: getClass\(\.\.\.\)\.\n {2}getClass\(\) — /);
+      assert.match(calls, AVISO);
+      assert.match(calls, /getSimpleName\(\) returns ""/);
+      assert.match(calls, /Never write a class name by hand in an expected value: build that part from the instance, for example `sut\.getClass\(\)\.getName\(\)`/);
+    });
+
+    it("cuenta también this.getClass()", () => {
+      const facts = factsOf(documento("public abstract class Documento", "this.getClass().getSimpleName()"), "Documento", "toString");
+
+      assert.match(facts, AVISO);
+    });
+
+    it("en una interfaz avisa que la instancia es una lambda o una clase anónima", () => {
+      const facts = factsOf(
+        [
+          "public interface Nombrado {",
+          "    String nombre();",
+          "    default String etiqueta() {",
+          '        return getClass().getSimpleName() + ":" + nombre();',
+          "    }",
+          "}",
+        ],
+        "Nombrado",
+        "etiqueta"
+      );
+
+      assert.match(facts, /getClass\(\) — the test's instance is a lambda or an anonymous class, not Nombrado itself/);
+    });
+
+    it("no avisa con una concreta, una fábrica ni con otro.getClass()", () => {
+      const casos: Array<[string, string[]]> = [
+        ["concreta", documento("public class Documento", "getClass().getName()")],
+        [
+          "fábrica",
+          documento("public abstract class Documento", "getClass().getName()").map((line) =>
+            line.replace("protected Documento", "private Documento")
+          ),
+        ],
+        ["otro objeto", documento("public abstract class Documento", "otro.getClass().getName()")],
+      ];
+
+      for (const [caso, lines] of casos) {
+        const facts = factsOf(lines, "Documento", "toString");
+        assert.ok(facts.length > 0, `${caso}: sin ficha`);
+        assert.ok(!facts.includes("getClass() —"), `${caso}: avisó\n${facts}`);
+      }
+    });
+  });
+
   describe("lectura", () => {
     it("no se confunde con comentarios, cadenas, inicializadores con llaves ni anotaciones con argumentos", () => {
       const facts = factsOf(

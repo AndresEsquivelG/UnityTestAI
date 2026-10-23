@@ -275,8 +275,7 @@ function instantiation(
   }
 
   const constructors = outline.members.filter((member) => member.kind === "constructor");
-  const visible = constructors.filter((member) => !isPrivate(member));
-  if (constructors.length > 0 && visible.length === 0) {
+  if (hasOnlyPrivateConstructors(outline)) {
     const factories = outline.members.filter(
       (member) =>
         member.kind === "method" &&
@@ -335,8 +334,54 @@ function describeCalls(
     lines.push(
       `Called by \`${unit.name}\` but not declared in ${className} (inherited from a supertype or statically imported): ${calls.undeclared.map((name) => `${name}(...)`).join(", ")}.`
     );
+    const warning = calls.undeclared.includes("getClass") ? getClassWarning(outline) : null;
+    if (warning) {
+      lines.push(`  ${warning}`);
+    }
   }
   return lines;
+}
+
+/**
+ * Qué devuelve `getClass()` cuando la prueba no puede crear la clase misma.
+ * En `buildStringRepresentation` los tres modelos escribieron a mano
+ * `AbstractDocument` en lo esperado, y el nombre era el de la subclase anónima
+ * que pide esta misma ficha.
+ */
+function getClassWarning(outline: TypeOutline): string | null {
+  const className = outline.name;
+  const fromInstance =
+    "Never write a class name by hand in an expected value: build that part from the instance, for example `sut.getClass().getName()`, where `sut` is the instance the test created.";
+
+  switch (anonymousInstance(outline)) {
+    case "subclass":
+      return `getClass() — the test's instance is an anonymous subclass, not ${className} itself: getClass().getName() returns the test class name followed by $1 ($2, $3… if the test creates more than one), and getSimpleName() returns "". ${fromInstance}`;
+    case "implementation":
+      return `getClass() — the test's instance is a lambda or an anonymous class, not ${className} itself: getClass().getName() returns a name made from the test class name ($1 for an anonymous class, $$Lambda for a lambda). ${fromInstance}`;
+    case null:
+      return null;
+  }
+}
+
+/**
+ * Qué crea la prueba cuando no puede crear la clase misma: una subclase anónima
+ * de una clase abstracta, o una lambda o clase anónima de una interfaz. `null`
+ * cuando la instancia es de la clase o la da una fábrica. Un método estático no
+ * llega aquí: no puede llamar a `getClass()` sin calificar.
+ */
+function anonymousInstance(outline: TypeOutline): "subclass" | "implementation" | null {
+  if (outline.kind === "interface") {
+    return "implementation";
+  }
+  if (outline.kind !== "class" || !outline.modifiers.includes("abstract") || hasOnlyPrivateConstructors(outline)) {
+    return null;
+  }
+  return "subclass";
+}
+
+function hasOnlyPrivateConstructors(outline: TypeOutline): boolean {
+  const constructors = outline.members.filter((member) => member.kind === "constructor");
+  return constructors.length > 0 && constructors.every(isPrivate);
 }
 
 function describeCalled(

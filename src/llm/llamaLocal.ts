@@ -2,10 +2,11 @@ import { streamText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { ChatMessage } from "./sessionManager";
 import type { LLMResult } from "./index";
+import { DEFAULT_OLLAMA_MODEL, OLLAMA_URL } from "./ollamaModels";
 
 const ollama = createOpenAICompatible({
   name: "ollama",
-  baseURL: "http://localhost:11434/v1",
+  baseURL: `${OLLAMA_URL}/v1`,
   // Without it Ollama sends no token counts when streaming.
   includeUsage: true,
 });
@@ -22,7 +23,7 @@ const ollama = createOpenAICompatible({
  */
 export async function generateWithOllama(
   messages: ChatMessage[],
-  model: string = "qwen2.5:14b",
+  model: string = DEFAULT_OLLAMA_MODEL,
 ): Promise<LLMResult> {
   // streamText reports failures through onError and rejects its promises with
   // a generic "no output" error; keep the real one so the panel shows it.

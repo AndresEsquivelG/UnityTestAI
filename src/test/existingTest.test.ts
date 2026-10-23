@@ -80,6 +80,19 @@ describe("ejecutar y medir una prueba que ya existe", () => {
     assert.ok(!lookup.found && /No hay una prueba de Carrito\.agregar generada con libreto: generala primero/.test(lookup.reason));
   });
 
+  it("solo reconoce la prueba del mismo proveedor y modelo", async () => {
+    const qwen = "src/test/java/com/tienda/UTIA_ollama_qwen2_5_14b_Carrito_agregar_Test.java";
+    await fsp.writeFile(path.join(fixture.projectRoot, ...qwen.split("/")), TEST_CODE, "utf8");
+    const lookup = (modelId: string) =>
+      findExistingTest({ adapter: new JavaAdapter(), rootPath: fixture.projectRoot, className: "Carrito", methodName: "agregar", modelId });
+
+    const same = await lookup("ollama/qwen2.5:14b");
+    assert.ok(same.found && same.test.savedPath.endsWith("UTIA_ollama_qwen2_5_14b_Carrito_agregar_Test.java"));
+
+    const other = await lookup("ollama/qwen2.5-coder:14b");
+    assert.ok(!other.found && /generada con ollama\/qwen2\.5-coder:14b: generala primero/.test(other.reason));
+  });
+
   it("con una unidad que no existe, avisa con el motivo del adaptador", async () => {
     const lookup = await find(new JavaAdapter(), "NoExiste");
     assert.ok(!lookup.found && lookup.reason.includes("NoExiste"));

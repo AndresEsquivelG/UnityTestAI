@@ -25,11 +25,10 @@ export function initJsonLoader() {
     try {
       const config = JSON.parse(text);
 
+      // `subModel` es opcional: sin él, la extensión usa el modelo por
+      // defecto del proveedor.
       if (!config.className || !config.methodName || !config.model) {
         throw new Error("Faltan campos obligatorios (className, methodName, model).");
-      }
-      if (config.model === "openrouter" && !config.subModel) {
-        throw new Error("El modelo 'openrouter' requiere subModel.");
       }
 
       // Mostrar UI de resultado y spinner
