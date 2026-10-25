@@ -122,6 +122,14 @@ export interface EcosystemAdapter {
    * crea una instancia, qué declara el tipo y qué llama la unidad. La cadena
    * vacía significa que no hay nada que decir. Es síncrona: todo sale del texto.
    *
+   * `location` es la declaración que eligió OP-05, con la ruta del archivo, y
+   * `project` el modelo de OP-04. La ficha los necesita cuando algo depende de
+   * dónde está el archivo y no de lo que dice: en un ecosistema en el que la
+   * prueba importa el módulo bajo prueba por su ruta, esa línea no está
+   * escrita en ningún lado del código, ningún agente ve la ruta, y desde qué
+   * carpeta se cuenta la ruta lo averiguó OP-04. Un adaptador que no los use
+   * los ignora.
+   *
    * El núcleo la agrega al contexto después del validador de contexto, de modo
    * que ningún modelo la recorta ni la reescribe, y de ahí llega al analizador,
    * al generador, al validador de la prueba y al corrector.
@@ -131,7 +139,12 @@ export interface EcosystemAdapter {
    * hereda de agente en agente: cada uno arranca sin el historial de los
    * anteriores y solo sabe lo que le llega en el prompt.
    */
-  describeUnit?(code: string, target: UnitTarget): string;
+  describeUnit?(
+    code: string,
+    target: UnitTarget,
+    location: SymbolCandidate,
+    project: ProjectModel
+  ): string;
 
   // ── Generación ───────────────────────────────────────────────────────────
 

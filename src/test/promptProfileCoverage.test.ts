@@ -5,6 +5,7 @@ import * as path from "path";
 import { templatePlaceholders } from "../core/prompts";
 import { unityPromptProfile } from "../adapters/unity/promptProfile";
 import { javaPromptProfile } from "../adapters/java/profile";
+import { pythonPromptProfile } from "../adapters/python/profile";
 import type { ProjectModel, PromptProfile } from "../core/contracts";
 
 /**
@@ -36,6 +37,7 @@ describe("cobertura del perfil sobre las plantillas neutras", () => {
   const PROFILES: readonly (readonly [string, PromptProfile])[] = [
     ["Unity", unityPromptProfile(projectOf("unity"))],
     ["Java", javaPromptProfile(projectOf("java"))],
+    ["Python", pythonPromptProfile()],
   ];
 
   function projectOf(ecosystemId: string): ProjectModel {

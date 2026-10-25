@@ -6,6 +6,7 @@ import { AdapterRegistry, selectEcosystem } from "./core/adapters";
 import type { DetectionContext } from "./core/contracts";
 import { UnityAdapter } from "./adapters/unity/unityAdapter";
 import { JavaAdapter } from "./adapters/java/javaAdapter";
+import { PythonAdapter } from "./adapters/python/pythonAdapter";
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
@@ -23,6 +24,7 @@ function createRegistry(): AdapterRegistry {
   const registry = new AdapterRegistry();
   registry.register(new UnityAdapter());
   registry.register(new JavaAdapter());
+  registry.register(new PythonAdapter());
   return registry;
 }
 

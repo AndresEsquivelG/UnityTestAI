@@ -97,7 +97,7 @@ export async function findExistingTest(query: ExistingTestQuery): Promise<Existi
   const { spec } = existing;
   const testCode = await readArtifact(project, spec);
   const source = await adapter.readSource(project, targetLocation);
-  const facts = describeUnitOrNothing(adapter, source.content, target).facts;
+  const facts = describeUnitOrNothing(adapter, source.content, target, targetLocation, project).facts;
 
   return {
     found: true,

@@ -129,7 +129,7 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
   // Sale del archivo entero, antes de que ningún agente lo recorte. Se suma
   // al contexto después del validador de contexto (ver más abajo), así que
   // ningún modelo la recorta ni la reescribe.
-  const unitFacts = describeUnitOrNothing(adapter, targetCode, target);
+  const unitFacts = describeUnitOrNothing(adapter, targetCode, target, targetLocation, project);
   if (supportsUnitFacts(adapter)) {
     // También vacía: así no queda a la vista la ficha de una corrida anterior.
     saveAgentOutput(outputRoot, "unit-facts", unitFacts);
@@ -464,12 +464,14 @@ export function describeUnitOrNothing(
   adapter: EcosystemAdapter,
   code: string,
   target: UnitTarget,
+  location: SymbolCandidate,
+  project: ProjectModel,
 ): { readonly facts: string; readonly error?: string } {
   if (!supportsUnitFacts(adapter)) {
     return { facts: "" };
   }
   try {
-    return { facts: adapter.describeUnit(code, target).trim() };
+    return { facts: adapter.describeUnit(code, target, location, project).trim() };
   } catch (err: any) {
     return { facts: "", error: err?.message ?? String(err) };
   }
