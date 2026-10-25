@@ -108,6 +108,8 @@ export interface CapabilityMap {
   readonly lifecycle: boolean;
   /** OP-17 — detección de las dependencias del proyecto en el código de la unidad. */
   readonly dependencyDetection: boolean;
+  /** OP-18 — ficha de la unidad leída del código, que se suma al contexto de los agentes. */
+  readonly unitFacts: boolean;
 }
 
 /**

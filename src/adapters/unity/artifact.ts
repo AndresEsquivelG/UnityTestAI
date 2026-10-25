@@ -6,6 +6,7 @@ import type {
   PreconditionViolation,
   ProjectModel,
 } from "../../core/contracts";
+import { baseArtifactName } from "../shared/artifactName";
 
 /**
  * Operaciones de materialización del adaptador Unity — OP-10, OP-11 y OP-12.
@@ -38,12 +39,9 @@ export function specifyUnityArtifact(request: ArtifactRequest): ArtifactSpec {
     request.target.className ??
     path.basename(request.targetLocation.filePath, EXTENSION);
 
-  const name = [
-    "UTIA",
-    toIdentifier(request.modelId),
-    toIdentifier(owner),
-    toIdentifier(request.target.methodName),
-  ].join("_");
+  // NUnit reconoce las pruebas por sus atributos y no por el nombre, así que
+  // la base común no necesita nada al final.
+  const name = baseArtifactName(request.modelId, owner, request.target.methodName);
 
   return {
     directory: testRoot,
@@ -119,10 +117,4 @@ export async function checkUnityPreconditions(
   }
 
   return violations;
-}
-
-/** Convierte un texto en un identificador válido de C#. */
-function toIdentifier(value: string): string {
-  const cleaned = value.replace(/[^A-Za-z0-9_]/g, "_");
-  return /^[0-9]/.test(cleaned) ? `_${cleaned}` : cleaned;
 }

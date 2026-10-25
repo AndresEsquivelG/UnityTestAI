@@ -177,12 +177,18 @@
   cursor: pointer; white-space: nowrap;
 }
 .submenu-title::after { content: "▶"; float: right; font-size: 12px; }
+/* Crece hacia arriba, como el menú: está al pie del panel, y hacia abajo los
+   últimos modelos quedaban fuera de la pantalla. */
 .submenu-content {
-  display: none; position: absolute; top: 0; right: 100%;
+  display: none; position: absolute; bottom: 0; right: 100%;
   background: #2d2d2d; min-width: 200px; border-radius: 8px;
   box-shadow: 0px 2px 8px rgba(0,0,0,0.5); z-index: 2000;
 }
-.submenu-content a { padding: 8px 12px; color: #fff; display: block; }
+.submenu-content a { padding: 8px 12px; color: #fff; display: block; white-space: nowrap; cursor: pointer; }
+.submenu-notice {
+  display: block; padding: 8px 12px; color: #bbb;
+  white-space: normal; max-width: 260px; font-size: 12px;
+}
 .submenu-content a:hover { background: #444; }
 .submenu:hover .submenu-content,
 .submenu-content:hover { display: block; }

@@ -70,6 +70,7 @@ export class FictitiousAdapter implements EcosystemAdapter {
     analysisSchemaExtension: false,
     lifecycle: false,
     dependencyDetection: false,
+    unitFacts: false,
   };
 
   /** OP-02 — Lo reclama el marcador en la raíz, y nada más. */

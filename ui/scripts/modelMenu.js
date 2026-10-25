@@ -1,26 +1,27 @@
 /**
  * @file modelMenu.js
  * @description
- * Controla la generación dinámica del menú de selección de modelos LLM y sus submodelos.
+ * Controla el menú de selección de modelos: un submenú por proveedor, con los
+ * modelos que se pueden elegir de cada uno.
  */
 
 /**
- * Modelo seleccionado.
+ * Proveedor seleccionado (`claude`, `chatgpt`, `llamaLocal`).
  * @type {string|null}
  */
 let selectedModel = null;
 
 /**
- * Submodelo seleccionado (si aplica).
+ * Modelo seleccionado dentro del proveedor (`claude-haiku-4-5`, `qwen2.5:14b`…).
  * @type {string|null}
  */
 let selectedSubModel = null;
 
 /**
- * Obtiene el modelo y submodelo seleccionados.
- * 
+ * Obtiene el proveedor y el modelo seleccionados.
+ *
  * @returns {{ selectedModel: string|null, selectedSubModel: string|null }}
- * Objeto con los identificadores del modelo y submodelo activos.
+ * Objeto con los identificadores del proveedor y del modelo activos.
  */
 export function getSelectedModel() {
   return { selectedModel, selectedSubModel };
@@ -28,21 +29,19 @@ export function getSelectedModel() {
 
 /**
  * Crea y renderiza el menú desplegable de modelos disponibles.
- * 
- * @param {Array<{ id: string, name: string }>} models - Lista de modelos disponibles.
+ *
+ * La extensión puede mandar el menú más de una vez (al abrir el panel y cuando
+ * este avisa que está listo). Si el modelo elegido sigue en la lista, se
+ * conserva; si no, se elige el primero.
+ *
+ * @param {Array<{ id: string, name: string, models: Array<{ id: string, label: string }>, notice?: string }>} providers
+ *   Proveedores, cada uno con sus modelos. `notice` dice por qué no tiene ninguno.
  * @param {HTMLElement} container - Contenedor donde se renderizará el menú.
  * @param {string} triggerId - ID asignado al botón principal del menú.
- * @param {object} vscode - API de VS Code para comunicación con el backend.
  */
-export function setModels(models, container, triggerId, vscode) {
+export function setModels(providers, container, triggerId) {
   container.innerHTML = "";
 
-  // Separar modelos normales de OpenRouter
-  const otherModels = models.filter(m => m.id !== "openrouter");
-  const openRouterModels = models.filter(m => m.id === "openrouter");
-  const orderedModels = [...otherModels, ...openRouterModels];
-
-  // Estructura base del menú desplegable
   const dropdown = document.createElement("div");
   dropdown.className = "dropdown";
 
@@ -54,79 +53,61 @@ export function setModels(models, container, triggerId, vscode) {
   const dropdownContent = document.createElement("div");
   dropdownContent.className = "dropdown-content";
 
-  // Crear cada elemento del menú
-  orderedModels.forEach((m, index) => {
-    if (m.id === "openrouter") { // Caso especial: modelo OpenRouter con submodelos
-      const submenu = document.createElement("div");
-      submenu.className = "submenu";
+  /** @type {{ provider: string, model: string, label: string }[]} */
+  const choices = [];
 
-      const submenuTitle = document.createElement("a");
-      submenuTitle.className = "submenu-title";
-      submenuTitle.textContent = "OpenRouter";
+  const choose = (choice) => {
+    selectedModel = choice.provider;
+    selectedSubModel = choice.model;
+    trigger.textContent = choice.label;
+  };
 
-      const submenuContent = document.createElement("div");
-      submenuContent.className = "submenu-content";
-      submenuContent.id = "openRouterSubmenu";
+  providers.forEach((provider) => {
+    const submenu = document.createElement("div");
+    submenu.className = "submenu";
 
-      submenu.appendChild(submenuTitle);
-      submenu.appendChild(submenuContent);
-      dropdownContent.appendChild(submenu);
-    } else {  // Modelos normales
-      const item = document.createElement("a");
-      item.textContent = m.name;
-      item.dataset.model = m.id;
+    const submenuTitle = document.createElement("a");
+    submenuTitle.className = "submenu-title";
+    submenuTitle.textContent = provider.name;
 
-      item.addEventListener("click", () => {
-        selectedModel = m.id;
-        selectedSubModel = null;
-        trigger.textContent = m.name;
-      });
+    const submenuContent = document.createElement("div");
+    submenuContent.className = "submenu-content";
 
-      dropdownContent.appendChild(item);
-
-      // Seleccionar el primer modelo por defecto
-      if (index === 0) {
-        selectedModel = m.id;
-        selectedSubModel = null;
-        trigger.textContent = m.name;
-      }
+    if (provider.models.length === 0) {
+      const notice = document.createElement("span");
+      notice.className = "submenu-notice";
+      notice.textContent = provider.notice || "No hay modelos para elegir.";
+      submenuContent.appendChild(notice);
     }
+
+    provider.models.forEach((model) => {
+      const choice = { provider: provider.id, model: model.id, label: model.label };
+      choices.push(choice);
+
+      const item = document.createElement("a");
+      item.textContent = model.label;
+      item.dataset.model = provider.id;
+      item.dataset.subModel = model.id;
+      item.addEventListener("click", () => choose(choice));
+      submenuContent.appendChild(item);
+    });
+
+    submenu.appendChild(submenuTitle);
+    submenu.appendChild(submenuContent);
+    dropdownContent.appendChild(submenu);
   });
 
   dropdown.appendChild(trigger);
   dropdown.appendChild(dropdownContent);
   container.appendChild(dropdown);
-}
 
-/**
- * Genera y vincula los submodelos del modelo OpenRouter dentro del menú.
- * 
- * @param {Array<{ label: string, model: string }>} subModels - Lista de submodelos disponibles.
- * @param {HTMLElement} submenuContent - Contenedor donde se añadirán los submodelos.
- * @param {string} triggerId - ID del botón principal del menú (para actualizar el texto al seleccionar).
- * @param {object} vscode - API de VS Code para comunicación con el backend.
- */
-export function setSubModels(subModels, submenuContent, triggerId, vscode) {
-  submenuContent.innerHTML = "";
-
-  subModels.forEach((m, i) => {
-    const subItem = document.createElement("a");
-    subItem.textContent = m.label;
-    subItem.dataset.model = m.model;
-
-    subItem.addEventListener("click", () => {
-      selectedModel = "openrouter";
-      selectedSubModel = m.model;
-      document.getElementById(triggerId).textContent = m.label; 
-    });
-
-    submenuContent.appendChild(subItem);
-
-    // Seleccionar primer submodelo por defecto si no hay otro modelo activo
-    if (i === 0 && selectedModel === null) {
-      selectedModel = "openrouter";
-      selectedSubModel = m.model;
-      document.getElementById(triggerId).textContent = m.label;
-    }
-  });
+  const kept = choices.find(
+    (choice) => choice.provider === selectedModel && choice.model === selectedSubModel
+  );
+  if (kept || choices.length > 0) {
+    choose(kept || choices[0]);
+  } else {
+    selectedModel = null;
+    selectedSubModel = null;
+  }
 }

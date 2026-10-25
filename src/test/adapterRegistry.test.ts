@@ -113,6 +113,24 @@ describe("registro de adaptadores", () => {
       ]);
     });
 
+    it("ata la ficha de la unidad a OP-18 en los dos sentidos", () => {
+      const sinOperacion = createStubAdapter({
+        id: "promete",
+        capabilities: { unitFacts: true },
+      });
+      const sinDeclarar = createStubAdapter({
+        id: "calla",
+        optional: { describeUnit: () => "" },
+      });
+
+      assert.deepEqual(findCapabilityMismatches(sinOperacion), [
+        'declara la capacidad "unitFacts" pero no implementa describeUnit()',
+      ]);
+      assert.deepEqual(findCapabilityMismatches(sinDeclarar), [
+        'implementa describeUnit() pero no declara la capacidad "unitFacts"',
+      ]);
+    });
+
     it("acepta un adaptador coherente", () => {
       const coherente = createStubAdapter({
         id: "coherente",

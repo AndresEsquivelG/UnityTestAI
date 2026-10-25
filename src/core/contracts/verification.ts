@@ -15,8 +15,10 @@
  * y con los archivos estructurados que producen. Hasta entonces, este archivo
  * es el primero que debe revisarse ante cualquier discrepancia.
  *
- * Los tres ya se contrastaron con una herramienta real: Unity 2021.3 en modo
- * batch, con su paquete de cobertura para OP-15.
+ * Los tres ya se contrastaron con herramientas reales: Unity 2021.3 en modo
+ * batch, con su paquete de cobertura para OP-15, y Maven 3.10 y Gradle 9.8 con
+ * JaCoCo 0.8.15. Java no pidió cambiar ninguna firma; sí sumó la cobertura
+ * de instrucción, que JaCoCo mide y Unity no.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -239,6 +241,7 @@ export interface UnitCoverage {
   readonly firstLine: number;
   readonly line: CoverageMetric;
   readonly decision?: CoverageMetric;
+  readonly instruction?: CoverageMetric;
 }
 
 /** Cobertura de un archivo concreto. */
@@ -247,6 +250,7 @@ export interface FileCoverage {
   readonly filePath: string;
   readonly line: CoverageMetric;
   readonly decision?: CoverageMetric;
+  readonly instruction?: CoverageMetric;
   /** Cada método o función con código medible, en el orden del archivo. */
   readonly units: readonly UnitCoverage[];
   /** Solo las líneas con código medible, en orden. */
@@ -256,10 +260,12 @@ export interface FileCoverage {
 /**
  * OP-15 — Informe de cobertura, global y por archivo.
  *
- * Contrastado con el paquete de cobertura de Unity. La cobertura de decisión
- * es opcional porque no todas las herramientas la entregan (ese paquete no la
- * mide), y algunas solo si se activa expresamente. Su ausencia quiere decir
- * «no disponible», nunca cero.
+ * Contrastado con el paquete de cobertura de Unity y con JaCoCo. La cobertura
+ * de decisión y la de instrucción son opcionales porque no todas las
+ * herramientas las entregan: el paquete de Unity no mide ninguna de las dos, y
+ * JaCoCo mide las dos. Su ausencia quiere decir «no disponible», nunca cero.
+ * Un total de cero, en cambio, es que la herramienta midió y no había nada que
+ * cubrir: un archivo sin ninguna condición no tiene decisiones.
  */
 export interface CoverageReport {
   /**
@@ -269,7 +275,10 @@ export interface CoverageReport {
    * ella. Lo mismo en cada archivo y en cada unidad.
    */
   readonly line: CoverageMetric;
+  /** Las ramas de cada condición: un `if` tiene dos, verdadera y falsa. */
   readonly decision?: CoverageMetric;
+  /** Las instrucciones del código compilado, la unidad más fina que se ejecuta. */
+  readonly instruction?: CoverageMetric;
   readonly byFile: readonly FileCoverage[];
   /**
    * La unidad bajo prueba. Falta si la herramienta no encontró código

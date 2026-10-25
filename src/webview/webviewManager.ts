@@ -9,12 +9,17 @@ import {
   generateWithClaude,
   type LLMResult,
 } from "../llm";
+import { artifactModelId, CLAUDE_MODELS, OPENAI_MODELS, type ModelChoice } from "../llm/models";
+import { DEFAULT_OLLAMA_MODEL, listOllamaModels } from "../llm/ollamaModels";
 import type { ActiveEcosystem } from "../core/adapters";
 import { readArtifact } from "../core/project";
 import type { VerificationOutcome } from "../core/verification";
 import {
+  checkExistingTest,
   checkGeneratedTest,
+  findExistingTest,
   generateTest,
+  locateExistingTest,
   runAndMeasure,
   type CheckStage,
   type EditorSelection,
@@ -107,13 +112,65 @@ type ModelProvider = (
   subModel?: string,
 ) => Promise<LLMResult>;
 
+/** El modelo de cada proveedor cuando no se eligió ninguno, como en la configuración JSON. */
+const defaultModels: Record<string, string> = {
+  chatgpt: OPENAI_MODELS[0].id,
+  llamaLocal: DEFAULT_OLLAMA_MODEL,
+  claude: CLAUDE_MODELS[0].id,
+};
+
 const modelProviders: Record<string, ModelProvider> = {
   chatgpt: (messages, subModel) =>
-    generateWithChatGPT(messages, subModel || "gpt-4o-mini"),
-  llamaLocal: (messages) => generateWithOllama(messages),
+    generateWithChatGPT(messages, subModel || defaultModels.chatgpt),
+  llamaLocal: (messages, subModel) =>
+    generateWithOllama(messages, subModel || defaultModels.llamaLocal),
   claude: (messages, subModel) =>
-    generateWithClaude(messages, subModel || "claude-haiku-4-5"),
+    generateWithClaude(messages, subModel || defaultModels.claude),
 };
+
+/**
+ * El modelo con el que se genera: el elegido, o el del proveedor si no se
+ * eligió ninguno. Se resuelve una vez porque también entra en el nombre de la
+ * prueba, y tiene que ser el mismo que el que la escribió.
+ */
+function chosenModel(provider: string, subModel: string | null | undefined): string {
+  return subModel || defaultModels[provider] || "";
+}
+
+/** Un proveedor del menú del panel, con los modelos que se pueden elegir. */
+interface MenuProvider {
+  readonly id: string;
+  readonly name: string;
+  readonly models: readonly ModelChoice[];
+  /** Por qué no hay modelos para elegir. */
+  readonly notice?: string;
+}
+
+/**
+ * El menú de modelos. Los de la nube aparecen si está su clave; los de Ollama
+ * se le preguntan a Ollama cada vez que se abre el panel.
+ */
+async function buildModelMenu(): Promise<MenuProvider[]> {
+  const menu: MenuProvider[] = [];
+  if (process.env.OPENAI_API_KEY) {
+    menu.push({ id: "chatgpt", name: "ChatGPT", models: OPENAI_MODELS });
+  }
+  if (process.env.ANTHROPIC_API_KEY) {
+    menu.push({ id: "claude", name: "Claude", models: CLAUDE_MODELS });
+  }
+
+  const ollama = await listOllamaModels();
+  menu.push(
+    ollama.ok
+      ? {
+          id: "llamaLocal",
+          name: "Ollama",
+          models: ollama.models.map((name) => ({ id: name, label: name })),
+        }
+      : { id: "llamaLocal", name: "Ollama", models: [], notice: ollama.reason },
+  );
+  return menu;
+}
 
 /**
  * Llamada sin historial. Los prompts de los agentes son autocontenidos: el
@@ -389,7 +446,8 @@ async function handleGenerate(
     return;
   }
 
-  generationMetaByPanel.set(panel, { className, methodName, model, subModel });
+  const chosen = chosenModel(model, subModel);
+  generationMetaByPanel.set(panel, { className, methodName, model, subModel: chosen });
 
   const generationStart = Date.now();
   tokenTotalsByPanel.set(panel, { inputTokens: 0, outputTokens: 0 });
@@ -403,10 +461,10 @@ async function handleGenerate(
       rootPath: ecosystem.rootPath,
       className,
       methodName,
-      modelId: model,
+      modelId: artifactModelId(model, chosen),
       reduceContext,
       editor,
-      ask: (prompt) => askOnce(provider, prompt, panel, subModel ?? undefined),
+      ask: (prompt) => askOnce(provider, prompt, panel, chosen),
       onEvent: (event) => showPipelineEvent(panel, event),
     });
 
@@ -437,6 +495,67 @@ async function handleGenerate(
   }
 }
 
+/**
+ * Compila, ejecuta y mide una prueba que ya está escrita, sin generarla. Deja
+ * el panel con lo mismo que una generación —la prueba, el modelo, la última
+ * verificación y el informe— para que después funcionen los reintentos, el
+ * botón del informe y el corrector del chat.
+ */
+async function handleRunExisting(
+  className: string,
+  methodName: string,
+  model: string,
+  subModel: string | null,
+  panel: vscode.WebviewPanel,
+  ecosystem: ActiveEcosystem,
+) {
+  if (verifyingPanels.has(panel)) {
+    panel.webview.postMessage({ command: "generationError" });
+    vscode.window.showWarningMessage(
+      "Hay una verificación en curso en este panel. Esperá a que termine para ejecutar otra vez.",
+    );
+    return;
+  }
+
+  const chosen = chosenModel(model, subModel);
+  try {
+    const lookup = await findExistingTest({
+      adapter: ecosystem.adapter,
+      rootPath: ecosystem.rootPath,
+      className,
+      methodName,
+      modelId: artifactModelId(model, chosen),
+    });
+    if (!lookup.found) {
+      panel.webview.postMessage({ command: "generationError" });
+      vscode.window.showErrorMessage(lookup.reason);
+      return;
+    }
+
+    generationMetaByPanel.set(panel, { className, methodName, model, subModel: chosen });
+    tokenTotalsByPanel.set(panel, { inputTokens: 0, outputTokens: 0 });
+    testContextByPanel.set(panel, lookup.test);
+    panel.webview.postMessage({ command: "clearPipeline" });
+    // Sin tiempo ni tokens: no hubo generación.
+    panel.webview.postMessage({ command: "showResult", result: lookup.test.testCode });
+
+    verifyingPanels.add(panel);
+    try {
+      await checkExistingTest({
+        adapter: ecosystem.adapter,
+        test: lookup.test,
+        coverageTemplate: COVERAGE_TEMPLATE,
+        onEvent: (event) => showPipelineEvent(panel, event),
+      });
+    } finally {
+      verifyingPanels.delete(panel);
+    }
+  } catch (err: any) {
+    panel.webview.postMessage({ command: "agentError", message: err.message });
+    vscode.window.showErrorMessage("Error al ejecutar la prueba: " + err.message);
+  }
+}
+
 // ── Webview panel ──────────────────────────────────────────────────────────────
 
 export async function createWebviewPanel(
@@ -459,12 +578,9 @@ export async function createWebviewPanel(
     },
   );
 
-  const models: { id: string; name: string; type?: string }[] = [];
-  if (process.env.OPENAI_API_KEY)
-    models.push({ id: "chatgpt", name: "ChatGPT", type: "direct" });
-  if (process.env.ANTHROPIC_API_KEY)
-    models.push({ id: "claude", name: "Claude", type: "direct" });
-  models.push({ id: "llamaLocal", name: "Llama Local", type: "direct" });
+  // Sin esperarlo: si Ollama está cerrado, tarda unos segundos en darse por
+  // cerrado, y el panel tiene que ir cargando mientras tanto.
+  const menu = buildModelMenu();
 
   // Ecosistema detectado, para que la interfaz diga contra qué se va a generar.
   // Sale del descriptor (OP-01) y de la evidencia de la detección (OP-02): el
@@ -497,7 +613,9 @@ export async function createWebviewPanel(
   html = html.replace("@@scriptUri", scriptUri.toString());
   panel.webview.html = html;
 
-  panel.webview.postMessage({ command: "setModels", models });
+  void menu.then((models) =>
+    panel.webview.postMessage({ command: "setModels", models }),
+  );
   panel.webview.postMessage({
     command: "setEcosystem",
     ecosystem: ecosystemInfo,
@@ -523,6 +641,32 @@ export async function createWebviewPanel(
           panel.webview.postMessage({ command: "resetInputs" });
           return;
         }
+
+        // Si ya hay una prueba de esa unidad con ese modelo, se pregunta antes
+        // de generar otra encima: medir la que está no llama al modelo.
+        const existing =
+          typeof message.model === "string"
+            ? locateExistingTest(
+                ecosystem.adapter,
+                project,
+                { className, methodName },
+                location.candidates[0],
+                artifactModelId(
+                  message.model,
+                  chosenModel(message.model, message.subModel),
+                ),
+              )
+            : undefined;
+        if (existing) {
+          panel.webview.postMessage({
+            command: "existingTest",
+            className,
+            methodName,
+            testFile: existing.relativePath,
+          });
+          break;
+        }
+
         panel.webview.postMessage({
           command: "goToStep2",
           className,
@@ -532,11 +676,11 @@ export async function createWebviewPanel(
       }
 
       case "webviewReady": {
-        panel.webview.postMessage({ command: "setModels", models });
         panel.webview.postMessage({
           command: "setEcosystem",
           ecosystem: ecosystemInfo,
         });
+        panel.webview.postMessage({ command: "setModels", models: await menu });
         break;
       }
 
@@ -569,6 +713,19 @@ export async function createWebviewPanel(
           message.subModel,
           editor,
           reduceContext,
+          panel,
+          ecosystem,
+        );
+        break;
+      }
+
+      case "runExistingTest": {
+        const { className, methodName } = await collectClassAndMethod(panel);
+        await handleRunExisting(
+          className,
+          methodName,
+          message.model,
+          message.subModel ?? null,
           panel,
           ecosystem,
         );

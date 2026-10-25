@@ -58,6 +58,11 @@ const BINDINGS: readonly CapabilityBinding[] = [
     declared: (capabilities) => capabilities.dependencyDetection,
     operations: ["detectDependencies"],
   },
+  {
+    capability: "unitFacts",
+    declared: (capabilities) => capabilities.unitFacts,
+    operations: ["describeUnit"],
+  },
 ];
 
 /**

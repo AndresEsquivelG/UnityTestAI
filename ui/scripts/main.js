@@ -3,7 +3,7 @@
 import { toggleElement } from "./domUtils.js";
 import { renderResult } from "./managers/resultRendererManager.js";
 import { getStepperState, setStepperState, applyStepUI } from "./stepper.js";
-import { setModels, setSubModels, getSelectedModel } from "./modelMenu.js";
+import { setModels, getSelectedModel } from "./modelMenu.js";
 import { initJsonLoader } from "./managers/jsonLoaderManager.js";
 import {
   showChatUI,
@@ -136,11 +136,16 @@ stepInput.addEventListener("keydown", (e) => {
     setStepperState(1, undefined, val);
     const { methodNameVal } = getStepperState();
 
-    // Enviar los datos (clase y método) al backend para validación
+    // Enviar los datos (clase y método) al backend para validación. El
+    // proveedor y el modelo van también: entran en el nombre del archivo de la
+    // prueba, y con ellos se sabe si ya hay una.
+    const { selectedModel, selectedSubModel } = getSelectedModel();
     vscode.postMessage({
       command: "validateInputs",
       className: classNameVal.trim(),
       methodName: methodNameVal.trim(),
+      model: selectedModel,
+      subModel: selectedSubModel,
     });
   }
 });
@@ -159,6 +164,7 @@ toggleBtn.addEventListener("click", () => {
 
 // Generar pruebas
 generateBtn.addEventListener("click", () => {
+  hideExistingTest();
   showLoadingUI();
   hideContextToggle();
   const { selectedModel, selectedSubModel } = getSelectedModel();
@@ -170,6 +176,88 @@ generateBtn.addEventListener("click", () => {
     reduceContext: getReduceContext(),
   });
 });
+
+/* ============================
+   Prueba que ya existe
+============================ */
+
+const existingTestNotice = document.getElementById("existingTestNotice");
+
+function hideExistingTest() {
+  if (!existingTestNotice) return;
+  existingTestNotice.replaceChildren();
+  existingTestNotice.style.display = "none";
+}
+
+/** Pasa al paso 2 y deja el panel esperando lo que pidió el botón. */
+function enterStep2() {
+  hideExistingTest();
+  setStepperState(2, undefined, undefined);
+  applyStepUI(2, {
+    currentStep,
+    stepperFill,
+    stepperBox,
+    readyBadge,
+    stepLabel,
+    stepInput,
+  });
+  showLoadingUI();
+  hideContextToggle();
+}
+
+function startGeneration() {
+  enterStep2();
+  const { selectedModel, selectedSubModel } = getSelectedModel();
+  vscode.postMessage({
+    command: "generateTest",
+    model: selectedModel,
+    subModel: selectedSubModel,
+    reduceContext: getReduceContext(),
+  });
+}
+
+/** Compila, ejecuta y mide la prueba que ya existe, sin llamar al modelo. */
+function startRunExisting() {
+  enterStep2();
+  const { selectedModel, selectedSubModel } = getSelectedModel();
+  vscode.postMessage({
+    command: "runExistingTest",
+    model: selectedModel,
+    subModel: selectedSubModel,
+  });
+}
+
+/**
+ * Ya hay una prueba de esa unidad con ese modelo: en lugar de generar otra
+ * sin preguntar, se ofrece medir la que está. Con textContent: los nombres
+ * vienen del código del proyecto.
+ */
+function showExistingTest(message) {
+  if (!existingTestNotice) return;
+  existingTestNotice.replaceChildren();
+
+  const text = document.createElement("div");
+  text.textContent = `Ya existe una prueba para el método ${message.methodName} de ${message.className}. Podés generar otra o ejecutarla y medirla, sin llamar al modelo.`;
+  const file = document.createElement("span");
+  file.className = "existing-test__file";
+  file.textContent = message.testFile;
+  text.appendChild(file);
+
+  const actions = document.createElement("div");
+  actions.className = "existing-test__actions";
+  const run = document.createElement("button");
+  run.textContent = "Ejecutar y medir";
+  run.addEventListener("click", startRunExisting);
+  const generate = document.createElement("button");
+  generate.textContent = "Generar otra";
+  generate.addEventListener("click", startGeneration);
+  actions.append(run, generate);
+
+  existingTestNotice.append(text, actions);
+  existingTestNotice.style.display = "block";
+  // «Todo listo» diría que la generación va a empezar, y espera la respuesta.
+  if (readyBadge) readyBadge.style.display = "none";
+}
 
 /* ============================
    Tiempo de generación
@@ -365,20 +453,7 @@ window.addEventListener("message", (event) => {
       setModels(
         message.models,
         document.getElementById("modelMenuContainer"),
-        "modelBtn",
-        vscode
-      );
-      break;
-
-    /* ----------------------------------------
-      Poblar submodelos (OpenRouter)
-    ---------------------------------------- */
-    case "setSubModels":
-      setSubModels(
-        message.subModels,
-        document.getElementById("openRouterSubmenu"),
-        "modelBtn",
-        vscode
+        "modelBtn"
       );
       break;
 
@@ -430,6 +505,7 @@ window.addEventListener("message", (event) => {
     ---------------------------------------- */
     case "resetInputs":
       clearAgentPipeline();
+      hideExistingTest();
       showContextToggle();
       setStepperState(0, "", "");
       applyStepUI(0, {
@@ -455,25 +531,14 @@ window.addEventListener("message", (event) => {
         Avanzar al paso 2 (generación del test)
     ---------------------------------------- */
     case "goToStep2":
-      setStepperState(2, undefined, undefined);
-      applyStepUI(2, {
-        currentStep,
-        stepperFill,
-        stepperBox,
-        readyBadge,
-        stepLabel,
-        stepInput,
-      });
-      showLoadingUI();
-      hideContextToggle();
+      startGeneration();
+      break;
 
-      const { selectedModel, selectedSubModel } = getSelectedModel();
-      vscode.postMessage({
-        command: "generateTest",
-        model: selectedModel,
-        subModel: selectedSubModel,
-        reduceContext: getReduceContext(),
-      });
+    /* ----------------------------------------
+        Ya hay una prueba de esa unidad: preguntar
+    ---------------------------------------- */
+    case "existingTest":
+      showExistingTest(message);
       break;
   }
 });

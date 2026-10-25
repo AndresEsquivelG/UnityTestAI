@@ -176,7 +176,7 @@ describe("etapa de cobertura", () => {
 });
 
 describe("presentación de la cobertura", () => {
-  it("resume la unidad bajo prueba y deja el archivo, la decisión y las notas como detalle", () => {
+  it("resume la unidad bajo prueba y deja el archivo, la decisión, la instrucción y las notas como detalle", () => {
     const presentation = presentCoverage(MEASURED, TARGET);
 
     assert.equal(presentation.stageName, "Cobertura");
@@ -184,18 +184,33 @@ describe("presentación de la cobertura", () => {
     assert.equal(presentation.summary, "método Divide, 66,7 % de líneas (2 de 3).");
     assert.deepEqual(presentation.details, [
       "Archivo src/calculo.x: 25 % de líneas (2 de 8).",
-      "Decisión: no disponible.",
+      "Decisión del archivo: no disponible.",
+      "Instrucción del archivo: no disponible.",
       "La herramienta cuenta instrucciones, no líneas.",
     ]);
   });
 
-  it("con decisión, la muestra con sus cifras", () => {
+  it("con decisión e instrucción, las muestra con sus cifras", () => {
     const presentation = presentCoverage(
-      { ...MEASURED, decision: { covered: 1, total: 4, percentage: 25 } },
+      {
+        ...MEASURED,
+        decision: { covered: 1, total: 4, percentage: 25 },
+        instruction: { covered: 34, total: 82, percentage: 41.5 },
+      },
       TARGET
     );
 
-    assert.ok(presentation.details?.includes("Decisión: 25 % de decisiones (1 de 4)."));
+    assert.ok(presentation.details?.includes("Decisión del archivo: 25 % de decisiones (1 de 4)."));
+    assert.ok(presentation.details?.includes("Instrucción del archivo: 41,5 % de instrucciones (34 de 82)."));
+  });
+
+  it("una decisión medida con total cero no es «no disponible» ni un 0 %", () => {
+    const presentation = presentCoverage(
+      { ...MEASURED, decision: { covered: 0, total: 0, percentage: 0 } },
+      TARGET
+    );
+
+    assert.ok(presentation.details?.includes("Decisión del archivo: no tiene condiciones."));
   });
 
   it("si no encontró la unidad, lo dice en vez de mostrar la cifra del archivo como suya", () => {

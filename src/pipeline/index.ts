@@ -12,6 +12,9 @@ export type { EditorSelection, GeneratedTest, GenerationRequest } from "./genera
 export { checkGeneratedTest, runAndMeasure } from "./check";
 export type { CheckRequest, RunRequest } from "./check";
 
+export { checkExistingTest, findExistingTest, locateExistingTest } from "./existing";
+export type { ExistingCheckRequest, ExistingTestLookup, ExistingTestQuery } from "./existing";
+
 export type {
   AgentStatus,
   Ask,
