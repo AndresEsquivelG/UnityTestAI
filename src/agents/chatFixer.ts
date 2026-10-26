@@ -3,6 +3,7 @@ import * as path from "path";
 import { z } from "zod";
 import { buildChatFixerPrompt } from "../prompts/promptBuilder";
 import type { PromptProfile } from "../core/contracts";
+import type { AskOptions } from "../llm";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 import { readCodeField } from "../utils/codeField";
 
@@ -56,7 +57,7 @@ export interface ChatFixerInput {
  */
 export async function runChatFixer(
   input: ChatFixerInput,
-  llmHandler: (prompt: string) => Promise<string>
+  llmHandler: (prompt: string, options?: AskOptions) => Promise<string>
 ): Promise<ChatFixerOutput> {
   const dumpDir = path.join(input.workspaceRoot, "AgentOutputs", input.dumpDir ?? "chat-fixer");
   fs.mkdirSync(dumpDir, { recursive: true });
@@ -71,7 +72,7 @@ export async function runChatFixer(
   );
   fs.writeFileSync(path.join(dumpDir, "chat-fixer-prompt.txt"), prompt, "utf8");
 
-  const raw = await llmHandler(prompt);
+  const raw = await llmHandler(prompt, { json: true });
   fs.writeFileSync(path.join(dumpDir, "chat-fixer-output.txt"), raw, "utf8");
 
   const clean = raw.trim().replace(/^```[a-z]*\s*/i, "").replace(/```$/, "").trim();

@@ -7,6 +7,7 @@ import { readCodeField } from "../utils/codeField";
 import { runTestValidator } from "../agents/validator";
 import { runChatFixer } from "../agents/chatFixer";
 import { unityPromptProfile } from "../adapters/unity/promptProfile";
+import type { AskOptions } from "../llm";
 import {
   ASSEMBLED_CONTEXT,
   CLASS_NAME,
@@ -114,6 +115,26 @@ describe("correcciones de los agentes", () => {
   it("el validador acepta una corrección bien formada", async () => {
     const raw = JSON.stringify({ status: "INVALID", issues: ["x"], correctedCode: CODE });
     assert.deepEqual(await validate(raw), { status: "FIXED", output: CODE, issues: ["x"] });
+  });
+
+  it("el corrector pide la respuesta en JSON", async () => {
+    let asked: AskOptions | undefined;
+    await runChatFixer(
+      {
+        profile,
+        testCode: TEST_CODE,
+        assembledContext: ASSEMBLED_CONTEXT,
+        userMessage: USER_MESSAGE,
+        className: CLASS_NAME,
+        methodName: METHOD_NAME,
+        workspaceRoot,
+      },
+      async (_prompt, options) => {
+        asked = options;
+        return JSON.stringify({ status: "INFO", message: "ok" });
+      }
+    );
+    assert.deepEqual(asked, { json: true });
   });
 
   it("el corrector del chat descarta una corrección mal codificada", async () => {

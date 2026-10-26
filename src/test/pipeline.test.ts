@@ -120,18 +120,22 @@ const SCRIPT: readonly ScriptLine[] = [
 /** Plantilla del informe de cobertura; el ficticio no mide, así que no se lee. */
 const COVERAGE_TEMPLATE = path.resolve(__dirname, "..", "..", "ui", "coverage", "report.html");
 
-/** Modelo que contesta según el libreto y anota a qué agente le contestó. */
+/** Modelo que contesta según el libreto y anota a qué agente le contestó, y cuáles pidieron JSON. */
 function scriptedModel(script: readonly ScriptLine[] = SCRIPT) {
   const calls: string[] = [];
-  const ask: Ask = async (prompt) => {
+  const jsonCalls: string[] = [];
+  const ask: Ask = async (prompt, options) => {
     const line = script.find(({ opening }) => prompt.startsWith(opening));
     if (!line) {
       throw new Error(`Prompt que el libreto no conoce: ${prompt.slice(0, 80)}`);
     }
     calls.push(line.agent);
+    if (options?.json) {
+      jsonCalls.push(line.agent);
+    }
     return line.response;
   };
-  return { ask, calls };
+  return { ask, calls, jsonCalls };
 }
 
 interface PipelineRun {
@@ -184,10 +188,29 @@ describe("pipeline entero sobre el adaptador ficticio", () => {
     return {
       test,
       calls: model.calls,
+      jsonCalls: model.jsonCalls,
       generation: events.slice(0, generationEvents),
       check: events.slice(generationEvents),
     };
   }
+
+  it("los agentes que leen JSON lo piden; el generador, que escribe código, no", async () => {
+    const { calls, jsonCalls } = await runPipeline();
+
+    assert.deepEqual(
+      calls.filter((agent) => agent !== "Test Generator"),
+      jsonCalls,
+      "cada agente que no es el generador tiene que pedir JSON"
+    );
+    assert.deepEqual(jsonCalls, [
+      "Method Slicer",
+      "Dependency Resolver",
+      "Context Builder",
+      "Context Validator",
+      "Code Analyzer",
+      "Test Validator",
+    ]);
+  });
 
   function agentSteps(events: readonly PipelineEvent[]): string[] {
     return events.flatMap((event) =>
@@ -267,6 +290,29 @@ describe("pipeline entero sobre el adaptador ficticio", () => {
       "Test Validator",
     ]);
     assert.ok(fs.existsSync(path.join(fixture.projectRoot, "pruebas", "prueba_calculadora_sumar.fic")));
+  });
+
+  it("si el recortador falla, sigue con el archivo entero, lo avisa y escribe la prueba", async () => {
+    const script = SCRIPT.map((line) =>
+      line.agent === "Method Slicer" ? { ...line, response: '{"status": "READY", "codeSlice": ["a" "b"]}' } : line
+    );
+
+    const { calls, generation, test } = await runPipeline({ script });
+
+    assert.deepEqual(calls, SCRIPT.map((line) => line.agent));
+    const slicer = generation.filter((event) => event.kind === "agent" && event.agent === "Method Slicer").at(-1);
+    assert.ok(slicer && slicer.kind === "agent");
+    assert.equal(slicer.status, "error");
+    assert.match(slicer.detail ?? "", /^Failed to parse LLM response as valid JSON: .*\. Se sigue con el archivo entero, sin recortar\.$/);
+
+    // El resolutor recibió el archivo entero, con el comentario y la otra
+    // función que el recorte habría quitado.
+    const resolverPrompt = fs.readFileSync(
+      path.join(fixture.projectRoot, "AgentOutputs", "dependency-resolver", "dependency-resolver-prompt.txt"),
+      "utf8"
+    );
+    assert.ok(resolverPrompt.includes("funcion dividir(a, b) {"));
+    assert.ok(fs.existsSync(test.savedPath));
   });
 
   it("si un agente falla, la corrida se corta y no escribe la prueba", async () => {

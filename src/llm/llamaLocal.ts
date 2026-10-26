@@ -1,7 +1,7 @@
 import { streamText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { ChatMessage } from "./sessionManager";
-import type { LLMResult } from "./index";
+import type { AskOptions, LLMResult } from "./index";
 import { DEFAULT_OLLAMA_MODEL, OLLAMA_URL } from "./ollamaModels";
 
 const ollama = createOpenAICompatible({
@@ -20,10 +20,18 @@ const ollama = createOpenAICompatible({
  * CPU writes about 2 tokens per second, so any answer longer than ~600 tokens
  * (a whole test file) was cut and retried from scratch, failing every time.
  * While streaming, that limit only applies between chunks.
+ *
+ * With `json`, Ollama is asked for a JSON object (`response_format`) and only
+ * lets the model write tokens that keep the answer valid JSON. Without it,
+ * qwen2.5-coder:14b copied a Python docstring into the method slicer's answer
+ * with its triple quotes unescaped (`"    """A pet shop""""`), and the
+ * generation stopped; with it, the same prompt came back as valid JSON, with
+ * the quotes escaped and no markdown fence (checked on 2026-10-26).
  */
 export async function generateWithOllama(
   messages: ChatMessage[],
   model: string = DEFAULT_OLLAMA_MODEL,
+  options: AskOptions = {},
 ): Promise<LLMResult> {
   // streamText reports failures through onError and rejects its promises with
   // a generic "no output" error; keep the real one so the panel shows it.
@@ -33,7 +41,12 @@ export async function generateWithOllama(
     messages,
     temperature: 0,
     providerOptions: {
-      ollama: { options: { num_ctx: 8192 } },
+      // The OpenAI-compatible provider copies these fields into the request
+      // body, after its own `response_format`.
+      ollama: {
+        options: { num_ctx: 8192 },
+        ...(options.json ? { response_format: { type: "json_object" } } : {}),
+      },
     },
     onError: ({ error }) => {
       failure = error;

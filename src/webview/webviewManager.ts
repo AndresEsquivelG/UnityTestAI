@@ -7,6 +7,7 @@ import {
   generateWithChatGPT,
   generateWithOllama,
   generateWithClaude,
+  type AskOptions,
   type LLMResult,
 } from "../llm";
 import { artifactModelId, CLAUDE_MODELS, OPENAI_MODELS, type ModelChoice } from "../llm/models";
@@ -110,6 +111,7 @@ function tokenTotals(panel: vscode.WebviewPanel) {
 type ModelProvider = (
   messages: ChatMessage[],
   subModel?: string,
+  options?: AskOptions,
 ) => Promise<LLMResult>;
 
 /** El modelo de cada proveedor cuando no se eligió ninguno, como en la configuración JSON. */
@@ -122,8 +124,9 @@ const defaultModels: Record<string, string> = {
 const modelProviders: Record<string, ModelProvider> = {
   chatgpt: (messages, subModel) =>
     generateWithChatGPT(messages, subModel || defaultModels.chatgpt),
-  llamaLocal: (messages, subModel) =>
-    generateWithOllama(messages, subModel || defaultModels.llamaLocal),
+  // Solo Ollama usa las opciones: Claude y ChatGPT ya devuelven JSON válido.
+  llamaLocal: (messages, subModel, options) =>
+    generateWithOllama(messages, subModel || defaultModels.llamaLocal, options),
   claude: (messages, subModel) =>
     generateWithClaude(messages, subModel || defaultModels.claude),
 };
@@ -182,10 +185,12 @@ async function askOnce(
   prompt: string,
   panel: vscode.WebviewPanel,
   subModel?: string,
+  options?: AskOptions,
 ): Promise<string> {
   const { text, usage } = await provider(
     [{ role: "user", content: prompt }],
     subModel,
+    options,
   );
   addTokenUsage(panel, usage);
   return text;
@@ -237,7 +242,7 @@ async function verifyInPanel(
       test: testCtx,
       className: meta.className,
       methodName: meta.methodName,
-      ask: (prompt) => askOnce(provider, prompt, panel, subModel),
+      ask: (prompt, options) => askOnce(provider, prompt, panel, subModel, options),
       tokenTotals: () => tokenTotals(panel),
       coverageTemplate: COVERAGE_TEMPLATE,
       onEvent: (event) => showPipelineEvent(panel, event),
@@ -464,7 +469,7 @@ async function handleGenerate(
       modelId: artifactModelId(model, chosen),
       reduceContext,
       editor,
-      ask: (prompt) => askOnce(provider, prompt, panel, chosen),
+      ask: (prompt, options) => askOnce(provider, prompt, panel, chosen, options),
       onEvent: (event) => showPipelineEvent(panel, event),
     });
 
@@ -790,7 +795,7 @@ export async function createWebviewPanel(
               methodName: meta.methodName,
               workspaceRoot: outputRoot,
             },
-            (prompt) => askOnce(provider, prompt, panel, subModel),
+            (prompt, options) => askOnce(provider, prompt, panel, subModel, options),
           );
           saveAgentOutput(outputRoot, "chat-fixer", fixResult);
 

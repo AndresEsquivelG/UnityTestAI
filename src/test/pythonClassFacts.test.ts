@@ -241,13 +241,101 @@ describe("ficha de la clase en Python", () => {
       assert.ok(!calls.includes("validar"), "una función anidada no es un método de la clase");
     });
 
-    it("lo que llama sobre self y la clase no declara es heredado", () => {
+    it("lo que llama sobre self, la clase no declara ni asigna y tiene base, es heredado de esa base", () => {
       const code = ["class Perro(Animal):", "    def ladrar(self):", "        return self.sonido() + self.volumen"];
       const facts = factsOf(code, "Perro", "ladrar");
 
-      assert.match(facts, /Called by `ladrar` but not declared in Perro \(inherited from a base class\): sonido\(\.\.\.\)\./);
+      assert.match(facts, /Called by `ladrar` but not declared in Perro \(inherited from Animal\): sonido\(\.\.\.\)\./);
       assert.match(facts, /If Python reports "Can't instantiate abstract class Perro/);
       assert.match(facts, /self\.volumen — not assigned anywhere in Perro/);
+    });
+
+    it("sin clase base, lo que no declara ni asigna no es heredado: no existe en una instancia nueva", () => {
+      const code = ["class Perro:", "    def ladrar(self):", "        return self.sonido()"];
+      const facts = factsOf(code, "Perro", "ladrar");
+
+      assert.ok(!facts.includes("inherited"), facts);
+      assert.match(facts, /neither declared nor assigned in Perro, which has no base class: sonido\(\.\.\.\)\. They do not exist on a new instance/);
+    });
+
+    it("llamar a lo que __init__ guardó de un parámetro: con qué argumentos se llama lo que se le pase", () => {
+      // La forma de PetShop en python-patterns, donde la ficha decía «heredado».
+      const code = [
+        "class PetShop:",
+        "    def __init__(self, animal_factory: type[Pet]) -> None:",
+        "        self.pet_factory = animal_factory",
+        "",
+        "    def buy_pet(self, name: str) -> Pet:",
+        "        pet = self.pet_factory(name)",
+        '        print(f"Here is your lovely {pet}")',
+        "        return pet",
+      ];
+      const facts = factsOf(code, "PetShop", "buy_pet");
+
+      assert.ok(!facts.includes("inherited"), facts);
+      assert.deepEqual(section(facts, "Called by `buy_pet` on attributes"), [
+        "Called by `buy_pet` on attributes, not on methods — each attribute holds something callable:",
+        "  self.pet_factory(name) — __init__ stores its parameter `animal_factory` here (`self.pet_factory = animal_factory`): whatever you pass as `animal_factory` is called as `animal_factory(name)`. Pass a class or a function that accepts those arguments.",
+      ]);
+    });
+
+    it("si lo guarda otro método, dice que __init__ no lo deja y cómo prepararlo", () => {
+      const code = [
+        "class Reloj:",
+        "    def usar(self, proveedor):",
+        "        self.proveedor = proveedor",
+        "",
+        "    def hora(self):",
+        "        return self.proveedor()",
+      ];
+      const [, line] = section(factsOf(code, "Reloj", "hora"), "Called by `hora` on attributes");
+
+      assert.equal(
+        line,
+        "  self.proveedor() — usar() stores its parameter `proveedor` here (`self.proveedor = proveedor`): whatever you pass as `proveedor` is called as `proveedor()`. Pass a class or a function that accepts those arguments. __init__ does not set it: call `sut.usar(...)` first, or assign `sut.proveedor` directly."
+      );
+    });
+
+    it("si lo guardan __init__ y otro método, manda __init__, aunque el otro esté antes", () => {
+      const code = [
+        "class Tienda:",
+        "    def cambiar(self, fabrica):",
+        "        self.fabrica = fabrica",
+        "",
+        "    def __init__(self, fabrica):",
+        "        self.fabrica = fabrica",
+        "",
+        "    def comprar(self, nombre):",
+        "        return self.fabrica(nombre)",
+      ];
+      const [, line] = section(factsOf(code, "Tienda", "comprar"), "Called by `comprar` on attributes");
+
+      assert.equal(
+        line,
+        "  self.fabrica(nombre) — __init__ stores its parameter `fabrica` here (`self.fabrica = fabrica`): whatever you pass as `fabrica` is called as `fabrica(nombre)`. Pass a class or a function that accepts those arguments. It is also assigned by cambiar()."
+      );
+    });
+
+    it("un valor fijo, un atributo de la clase y self.__class__ dicen de dónde salen", () => {
+      const code = [
+        "import datetime",
+        "",
+        "class Pantalla:",
+        "    formato = str.upper",
+        "",
+        "    def __init__(self):",
+        "        self.reloj = datetime.datetime.now",
+        "",
+        "    def mostrar(self):",
+        "        return self.formato(str(self.reloj())) + repr(self.__class__())",
+      ];
+      const lines = section(factsOf(code, "Pantalla", "mostrar"), "Called by `mostrar` on attributes");
+
+      assert.deepEqual(lines.slice(1), [
+        '  self.formato(str(self.reloj())) — `formato` is a class attribute of Pantalla: the call runs the value it holds. Replace it in a test with `monkeypatch.setattr(sut, "formato", ...)`.',
+        "  self.reloj() — set by __init__: `self.reloj = datetime.datetime.now`. Replace it in a test by assigning `sut.reloj`.",
+        "  self.__class__() — Python's own attribute: `self.__class__` is the class of the instance, so this creates a new instance of that class.",
+      ]);
     });
 
     it("una llamada sobre otro objeto no es de la clase", () => {

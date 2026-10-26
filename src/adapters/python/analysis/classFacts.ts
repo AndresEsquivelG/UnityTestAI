@@ -9,6 +9,7 @@ import {
   findClasses,
   methodsOf,
   outlinePython,
+  statementsOf,
   type PythonBlock,
   type PythonOutline,
   type SourceRange,
@@ -174,7 +175,13 @@ function selfAssignments(outline: PythonOutline, body: SourceRange): Set<string>
 interface Calls {
   /** Métodos de la clase que usa la unidad, o uno con `_` que ella usa. */
   readonly members: readonly PythonBlock[];
-  /** Llamados sobre `self` que la clase no declara. */
+  /**
+   * Llamados a algo guardado en un atributo, que no es un método: la clase lo
+   * asigna (`self.pet_factory = animal_factory`), es un atributo de la clase o
+   * es uno de Python (`self.__class__`). Con los argumentos de la llamada.
+   */
+  readonly stored: readonly { readonly name: string; readonly args: string }[];
+  /** Llamados sobre `self` que la clase no declara ni asigna. */
   readonly undeclared: readonly string[];
 }
 
@@ -186,14 +193,16 @@ interface Calls {
  */
 function readCalls(outline: PythonOutline, info: ClassInfo, unit: PythonBlock): Calls {
   const members: PythonBlock[] = [];
+  const stored: { name: string; args: string }[] = [];
   const undeclared: string[] = [];
   const seen = new Set<string>();
   const pending: SourceRange[] = [unit.body];
   let followed = 0;
+  const assigned = new Set([...info.assignments.values()].flatMap((names) => [...names]));
 
   while (pending.length > 0) {
     const body = pending.shift()!;
-    for (const { name, called } of usedNames(outline, body, info.block.name)) {
+    for (const { name, called, open } of usedNames(outline, body, info.block.name)) {
       if (seen.has(name) || name === unit.name) {
         continue;
       }
@@ -201,7 +210,15 @@ function readCalls(outline: PythonOutline, info: ClassInfo, unit: PythonBlock): 
       if (declared.length === 0) {
         if (called) {
           seen.add(name);
-          undeclared.push(name);
+          // Llamar a un atributo no es llamar a un método heredado: en
+          // `PetShop.buy_pet`, `self.pet_factory(name)` llama a la fábrica que
+          // recibió `__init__`, y la ficha decía que era heredado de una clase
+          // base que `PetShop` no tiene (2026-10-26, con qwen2.5:14b).
+          if (assigned.has(name) || info.classAttributes.includes(name) || isDunder(name)) {
+            stored.push({ name, args: callArguments(outline, open) });
+          } else {
+            undeclared.push(name);
+          }
         }
         continue;
       }
@@ -218,18 +235,67 @@ function readCalls(outline: PythonOutline, info: ClassInfo, unit: PythonBlock): 
     }
   }
 
-  return { members, undeclared };
+  return { members, stored, undeclared };
 }
 
-/** Nombres usados sobre `self`, `cls` o la clase, en orden, y si se llaman. */
+/**
+ * Nombres usados sobre `self`, `cls` o la clase, en orden, y si se llaman. En
+ * una llamada, `open` es la posición del paréntesis que abre los argumentos.
+ */
 function usedNames(
   outline: PythonOutline,
   body: SourceRange,
   className: string
-): { name: string; called: boolean }[] {
+): { name: string; called: boolean; open: number }[] {
   const text = outline.scanned.masked.slice(body.start, body.end);
   const access = new RegExp(String.raw`(?<![\p{L}\p{N}_.])(?:self|cls|${className})\s*\.\s*(${NAME})(\s*\()?`, "gu");
-  return [...text.matchAll(access)].map((match) => ({ name: match[1], called: match[2] !== undefined }));
+  return [...text.matchAll(access)].map((match) => ({
+    name: match[1],
+    called: match[2] !== undefined,
+    open: body.start + match.index + match[0].length - 1,
+  }));
+}
+
+/** Lo que va entre los paréntesis de una llamada, con los espacios colapsados. */
+function callArguments(outline: PythonOutline, open: number): string {
+  const { masked } = outline.scanned;
+  let depth = 0;
+  for (let index = open; index < masked.length; index++) {
+    const character = masked[index];
+    if (character === "(" || character === "[" || character === "{") {
+      depth++;
+    } else if (character === ")" || character === "]" || character === "}") {
+      depth--;
+      if (depth === 0) {
+        return collapsed(outline.scanned, open + 1, index);
+      }
+    }
+  }
+  return "…";
+}
+
+/**
+ * Lo que un método guarda en `self.<name>` con una asignación simple
+ * (`self.pet_factory = animal_factory`), o `undefined` si no lo asigna así.
+ */
+function assignedValue(outline: PythonOutline, method: PythonBlock, name: string): string | undefined {
+  const text = outline.scanned.masked.slice(method.body.start, method.body.end);
+  const assignment = new RegExp(String.raw`\bself\s*\.\s*${name}\s*(?::[^=\n]*)?=(?!=)`, "u").exec(text);
+  if (!assignment) {
+    return undefined;
+  }
+  const valueStart = method.body.start + assignment.index + assignment[0].length;
+  const statement = statementsOf(outline.scanned).find(
+    (candidate) => candidate.start <= valueStart && valueStart < candidate.end
+  );
+  return statement ? collapsed(outline.scanned, valueStart, statement.end) : undefined;
+}
+
+/** Los nombres de los parámetros de un método, sin `self`, `cls`, `*` ni `/`. */
+function parameterNames(method: PythonBlock): string[] {
+  return splitTopLevel(method.parameters)
+    .map((parameter) => parameter.replace(/^\*+/, "").split(/[:=]/)[0].trim())
+    .filter((name) => name !== "" && name !== "self" && name !== "cls" && name !== "/");
 }
 
 /** Atributos que la unidad lee y que `__init__` no crea, con quién los asigna. */
@@ -524,12 +590,64 @@ function describeCalls(outline: PythonOutline, info: ClassInfo, unit: PythonBloc
     }
   }
 
+  if (calls.stored.length > 0) {
+    lines.push(`Called by \`${unit.name}\` on attributes, not on methods — each attribute holds something callable:`);
+    for (const call of calls.stored) {
+      lines.push(`  ${describeStored(outline, info, call)}`);
+    }
+  }
+
   if (calls.undeclared.length > 0) {
+    const names = calls.undeclared.map((name) => `${name}(...)`).join(", ");
     lines.push(
-      `Called by \`${unit.name}\` but not declared in ${className} (inherited from a base class): ${calls.undeclared.map((name) => `${name}(...)`).join(", ")}.`
+      info.bases.length > 0
+        ? `Called by \`${unit.name}\` but not declared in ${className} (inherited from ${info.bases.join(", ")}): ${names}.`
+        : `Called by \`${unit.name}\` but neither declared nor assigned in ${className}, which has no base class: ${names}. They do not exist on a new instance: assign them on \`sut\` before calling \`${unit.name}\`, or the call raises AttributeError.`
     );
   }
   return lines;
+}
+
+/**
+ * De dónde sale lo que se llama sobre un atributo. Si el método que lo guarda
+ * lo recibió como parámetro, se dice con qué argumentos se va a llamar lo que
+ * se le pase: es lo que el modelo tiene que saber para pasar una clase o una
+ * función que sirva (en `PetShop`, `PetShop(Dog)`).
+ */
+function describeStored(outline: PythonOutline, info: ClassInfo, call: { name: string; args: string }): string {
+  const className = info.block.name;
+  const invocation = `self.${call.name}(${call.args})`;
+
+  if (isDunder(call.name)) {
+    return call.name === "__class__"
+      ? `${invocation} — Python's own attribute: \`self.__class__\` is the class of the instance, so this creates a new instance of that class.`
+      : `${invocation} — Python's own attribute \`${call.name}\`, present on every object.`;
+  }
+
+  // Primero __init__, que es el que deja el atributo en una instancia nueva.
+  const setters = info.methods
+    .filter((method) => info.assignments.get(method)?.has(call.name))
+    .sort((a, b) => Number(b.name === "__init__") - Number(a.name === "__init__"));
+  const setter = setters[0];
+  if (!setter) {
+    return `${invocation} — \`${call.name}\` is a class attribute of ${className}: the call runs the value it holds. Replace it in a test with \`monkeypatch.setattr(sut, "${call.name}", ...)\`.`;
+  }
+
+  const others = setters.slice(1).map((method) => `${method.name}()`);
+  const alsoSet = others.length > 0 ? ` It is also assigned by ${others.join(", ")}.` : "";
+  const value = assignedValue(outline, setter, call.name);
+  const where = setter.name === "__init__" ? "__init__" : `${setter.name}()`;
+  const before =
+    setter.name === "__init__"
+      ? ""
+      : ` __init__ does not set it: call \`sut.${setter.name}(...)\` first, or assign \`sut.${call.name}\` directly.`;
+
+  if (value !== undefined && parameterNames(setter).includes(value)) {
+    return `${invocation} — ${where} stores its parameter \`${value}\` here (\`self.${call.name} = ${value}\`): whatever you pass as \`${value}\` is called as \`${value}(${call.args})\`. Pass a class or a function that accepts those arguments.${before}${alsoSet}`;
+  }
+  return value !== undefined
+    ? `${invocation} — set by ${where}: \`self.${call.name} = ${value}\`. Replace it in a test by assigning \`sut.${call.name}\`.${before}${alsoSet}`
+    : `${invocation} — set by ${where}.${before}${alsoSet}`;
 }
 
 function describeCalled(outline: PythonOutline, info: ClassInfo, member: PythonBlock, unit: PythonBlock): string[] {

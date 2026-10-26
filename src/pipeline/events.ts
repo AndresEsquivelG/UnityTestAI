@@ -1,7 +1,11 @@
 import type { VerificationOutcome, VerificationPresentation } from "../core/verification";
+import type { AskOptions } from "../llm";
 
-/** Llamada al modelo de lenguaje: recibe un prompt y devuelve la respuesta. */
-export type Ask = (prompt: string) => Promise<string>;
+/**
+ * Llamada al modelo de lenguaje: recibe un prompt y devuelve la respuesta. Los
+ * agentes que leen la respuesta como JSON lo dicen en `options`.
+ */
+export type Ask = (prompt: string, options?: AskOptions) => Promise<string>;
 
 export type AgentStatus = "running" | "done" | "error";
 

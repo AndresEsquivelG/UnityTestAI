@@ -3,6 +3,7 @@ import * as path from "path";
 import { z } from "zod";
 import { buildMethodSlicerPrompt } from "../prompts/promptBuilder";
 import type { PromptProfile } from "../core/contracts";
+import type { AskOptions } from "../llm";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -65,7 +66,7 @@ function withReadyStatus(json: unknown): unknown {
  */
 export async function runMethodSlicer(
   input: MethodSlicerInput,
-  llmHandler: (prompt: string) => Promise<string>
+  llmHandler: (prompt: string, options?: AskOptions) => Promise<string>
 ): Promise<MethodSlicerOutput> {
   const prompt = buildMethodSlicerPrompt(
     input.profile,
@@ -78,7 +79,7 @@ export async function runMethodSlicer(
   fs.mkdirSync(dumpDir, { recursive: true });
   fs.writeFileSync(path.join(dumpDir, "method-slicer-prompt.txt"), prompt, "utf8");
 
-  const raw = await llmHandler(prompt);
+  const raw = await llmHandler(prompt, { json: true });
 
   fs.writeFileSync(path.join(dumpDir, "method-slicer-output.txt"), raw, "utf8");
 

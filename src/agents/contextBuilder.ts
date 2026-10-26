@@ -3,6 +3,7 @@ import * as path from "path";
 import { z } from "zod";
 import { buildContextBuilderPrompt } from "../prompts/promptBuilder";
 import type { PromptProfile } from "../core/contracts";
+import type { AskOptions } from "../llm";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -83,7 +84,7 @@ function assembleFinalContext(
  */
 export async function runContextBuilder(
   input: ContextBuilderInput,
-  llmHandler: (prompt: string) => Promise<string>
+  llmHandler: (prompt: string, options?: AskOptions) => Promise<string>
 ): Promise<ContextBuilderOutput> {
   const dumpDir = path.join(input.workspaceRoot, "AgentOutputs", "context-builder");
   fs.mkdirSync(dumpDir, { recursive: true });
@@ -114,7 +115,7 @@ export async function runContextBuilder(
 
   fs.writeFileSync(path.join(dumpDir, "context-builder-prompt.txt"), prompt, "utf8");
 
-  const raw = await llmHandler(prompt);
+  const raw = await llmHandler(prompt, { json: true });
 
   fs.writeFileSync(path.join(dumpDir, "context-builder-output.txt"), raw, "utf8");
 

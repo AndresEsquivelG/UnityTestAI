@@ -3,6 +3,7 @@ import * as path from "path";
 import { z } from "zod";
 import { buildDependencyResolverPrompt } from "../prompts/promptBuilder";
 import type { PromptProfile } from "../core/contracts";
+import type { AskOptions } from "../llm";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -48,7 +49,7 @@ export interface DependencyResolverInput {
  */
 export async function runDependencyResolver(
   input: DependencyResolverInput,
-  llmHandler: (prompt: string) => Promise<string>
+  llmHandler: (prompt: string, options?: AskOptions) => Promise<string>
 ): Promise<DependencyResolverOutput> {
   const prompt = buildDependencyResolverPrompt(
     input.profile,
@@ -62,7 +63,7 @@ export async function runDependencyResolver(
   fs.mkdirSync(dumpDir, { recursive: true });
   fs.writeFileSync(path.join(dumpDir, "dependency-resolver-prompt.txt"), prompt, "utf8");
 
-  const raw = await llmHandler(prompt);
+  const raw = await llmHandler(prompt, { json: true });
 
   fs.writeFileSync(path.join(dumpDir, "dependency-resolver-output.txt"), raw, "utf8");
 

@@ -149,7 +149,13 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
     : undefined;
 
   // ── Step 0: Method Slicer ──────────────────────────────────────────────
-  let codeSlice: string;
+  // Si el recortador falla, se sigue con el archivo entero, como sin «reducir
+  // contexto»: recortar ahorra tokens, pero no hace falta para generar, y
+  // cortar la generación por eso tiraba todo lo demás. Pasó con
+  // qwen2.5-coder:14b, que devolvió un JSON roto (2026-10-26). Es una falla
+  // blanda, como la del validador de contexto: queda a la vista y se sigue.
+  let codeSlice = targetCode;
+  let sliced = false;
   if (reduceContext) {
     const slicerAgent = "Method Slicer";
     notifyAgent(slicerAgent, "running");
@@ -166,14 +172,16 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
     saveAgentOutput(outputRoot, "method-slicer", slicerResult);
 
     if (slicerResult.status === "ERROR") {
-      notifyAgent(slicerAgent, "error", slicerResult.message);
-      throw new Error(`Method Slicer failed: ${slicerResult.message}`);
+      notifyAgent(
+        slicerAgent,
+        "error",
+        `${slicerResult.message}. Se sigue con el archivo entero, sin recortar.`,
+      );
+    } else {
+      notifyAgent(slicerAgent, "done");
+      codeSlice = slicerResult.codeSlice.join("\n");
+      sliced = true;
     }
-    notifyAgent(slicerAgent, "done");
-
-    codeSlice = slicerResult.codeSlice.join("\n");
-  } else {
-    codeSlice = targetCode;
   }
 
   // ── Step 1: Dependency Resolver ──────────────────────────────────────────
@@ -210,11 +218,12 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
   if (supportsDependencyDetection(adapter)) {
     try {
       // Sin recorte, `codeSlice` es el archivo entero: el foco limita la
-      // detección al método, como se le pide al agente.
+      // detección al método, como se le pide al agente. Lo mismo si el
+      // recortador falló.
       detectedReferences = await adapter.detectDependencies(
         project,
         codeSlice,
-        reduceContext ? undefined : target,
+        sliced ? undefined : target,
       );
     } catch (err: any) {
       // Complementa al agente: si falla, se sigue con lo que él pidió.

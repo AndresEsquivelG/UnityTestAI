@@ -3,6 +3,7 @@ import * as path from "path";
 import { z } from "zod";
 import { buildContextValidatorPrompt, buildTestValidatorPrompt } from "../prompts/promptBuilder";
 import type { PromptProfile } from "../core/contracts";
+import type { AskOptions } from "../llm";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 import { readCodeField } from "../utils/codeField";
 
@@ -108,7 +109,7 @@ export interface ContextValidatorInput {
  */
 export async function runContextValidator(
   input: ContextValidatorInput,
-  llmHandler: (prompt: string) => Promise<string>
+  llmHandler: (prompt: string, options?: AskOptions) => Promise<string>
 ): Promise<ValidatorOutput> {
   const dumpDir = path.join(input.workspaceRoot, "AgentOutputs", "validator-context");
   fs.mkdirSync(dumpDir, { recursive: true });
@@ -122,7 +123,7 @@ export async function runContextValidator(
   );
   fs.writeFileSync(path.join(dumpDir, "validator-context-prompt.txt"), prompt, "utf8");
 
-  const raw = await llmHandler(prompt);
+  const raw = await llmHandler(prompt, { json: true });
   fs.writeFileSync(path.join(dumpDir, "validator-context-output.txt"), raw, "utf8");
 
   const result = parseValidatorResponse(raw, input.assembledContext, "correctedContext");
@@ -162,7 +163,7 @@ export interface TestValidatorInput {
  */
 export async function runTestValidator(
   input: TestValidatorInput,
-  llmHandler: (prompt: string) => Promise<string>
+  llmHandler: (prompt: string, options?: AskOptions) => Promise<string>
 ): Promise<ValidatorOutput> {
   const dumpDir = path.join(input.workspaceRoot, "AgentOutputs", "validator-test");
   fs.mkdirSync(dumpDir, { recursive: true });
@@ -176,7 +177,7 @@ export async function runTestValidator(
   );
   fs.writeFileSync(path.join(dumpDir, "validator-test-prompt.txt"), prompt, "utf8");
 
-  const raw = await llmHandler(prompt);
+  const raw = await llmHandler(prompt, { json: true });
   fs.writeFileSync(path.join(dumpDir, "validator-test-output.txt"), raw, "utf8");
 
   const result = parseValidatorResponse(raw, input.testCode, "correctedCode");

@@ -3,6 +3,7 @@ import * as path from "path";
 import { z, type ZodRawShape } from "zod";
 import { buildCodeAnalyzerPrompt } from "../prompts/promptBuilder";
 import type { PromptProfile } from "../core/contracts";
+import type { AskOptions } from "../llm";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
 // ── Output schema ──────────────────────────────────────────────────────────────
@@ -138,7 +139,7 @@ export interface CodeAnalyzerInput {
  */
 export async function runCodeAnalyzer(
   input: CodeAnalyzerInput,
-  llmHandler: (prompt: string) => Promise<string>
+  llmHandler: (prompt: string, options?: AskOptions) => Promise<string>
 ): Promise<CodeAnalyzerOutput> {
   const prompt = buildCodeAnalyzerPrompt(
     input.profile,
@@ -152,7 +153,7 @@ export async function runCodeAnalyzer(
   fs.mkdirSync(dumpDir, { recursive: true });
   fs.writeFileSync(path.join(dumpDir, "code-analyzer-prompt.txt"), prompt, "utf8");
 
-  const raw = await llmHandler(prompt);
+  const raw = await llmHandler(prompt, { json: true });
 
   // ── Save raw LLM response (txt) ──────────────────────────────────────────
   fs.writeFileSync(path.join(dumpDir, "code-analyzer-output.txt"), raw, "utf8");
