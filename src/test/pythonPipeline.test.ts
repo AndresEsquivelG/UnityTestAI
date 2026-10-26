@@ -6,6 +6,7 @@ import * as path from "path";
 import { checkGeneratedTest, generateTest, type Ask, type PipelineEvent } from "../pipeline";
 import { PythonAdapter } from "../adapters/python/pythonAdapter";
 import { createPythonFixture, type PythonFixture } from "./support/pythonFixture";
+import { fakePythonRuntime } from "./support/pythonRunOutputs";
 
 /**
  * El pipeline entero sobre el adaptador de Python, con un modelo «de libreto»
@@ -15,8 +16,8 @@ import { createPythonFixture, type PythonFixture } from "./support/pythonFixture
  * operaciones de Python de punta a punta. El resolutor pide la dependencia con
  * su nombre con puntos, el analizador devuelve los campos propios de Python y
  * el generador los recibe, la ficha llega con la línea que importa la clase, y
- * la prueba queda escrita en `tests/` sin el cercado. Como esta primera parte no
- * comprueba, ni ejecuta, ni mide, las tres etapas dicen que no aplican.
+ * la prueba queda escrita en `tests/` sin el cercado. Después la comprueba, la
+ * ejecuta y la mide con un Python de mentira (`pythonRunOutputs.ts`).
  */
 
 /** Lo que devolvería un modelo: con cercado. */
@@ -210,28 +211,61 @@ describe("pipeline entero sobre el adaptador de Python", () => {
     assert.match(model.prompts.get("Test Generator") ?? "", /\n {2}from tienda\.carrito import Carrito\n/);
   });
 
-  it("como esta parte no comprueba, ni ejecuta, ni mide, las tres etapas dicen que no aplican", async () => {
-    const model = scriptedModel();
-    const test = await generate(model.ask);
+  async function check(adapter: PythonAdapter, test: Awaited<ReturnType<typeof generate>>, ask: Ask) {
     const events: PipelineEvent[] = [];
-
     await checkGeneratedTest({
-      adapter: new PythonAdapter(),
+      adapter,
       test,
       className: "Carrito",
       methodName: "agregar",
-      ask: model.ask,
+      ask,
       tokenTotals: () => ({ inputTokens: 0, outputTokens: 0 }),
       coverageTemplate: COVERAGE_TEMPLATE,
       onEvent: (event) => events.push(event),
     });
+    return events;
+  }
 
-    const shown = events.flatMap((event) =>
+  /** El estado que mostró cada etapa, en orden, sin los avisos de «corriendo». */
+  const shown = (events: readonly PipelineEvent[]) =>
+    events.flatMap((event) =>
       event.kind !== "verified" && "presentation" in event
         ? [`${event.presentation.stageName}: ${event.presentation.status}`]
         : []
     );
-    assert.deepEqual(shown, ["Verificación: notApplicable", "Ejecución: notApplicable", "Cobertura: notApplicable"]);
+
+  it("comprueba que se importa, la ejecuta y la mide con el Python del proyecto", async () => {
+    const model = scriptedModel();
+    const test = await generate(model.ask);
+    const runtime = fakePythonRuntime();
+
+    const events = await check(new PythonAdapter({ runtime }), test, model.ask);
+
+    assert.deepEqual(shown(events), [
+      "Comprobación de importabilidad: passed",
+      "Ejecución: passed",
+      "Cobertura: measured",
+    ]);
+    assert.deepEqual(runtime.steps(), ["review", "collect", "coverageRun", "coverageJson"]);
+    const coverage = events.find((event) => event.kind === "coverage");
+    assert.ok(coverage && coverage.kind === "coverage");
+    assert.equal(coverage.presentation.summary, "método agregar, 90 % de líneas (9 de 10).");
+    assert.ok(coverage.presentation.details?.includes("Decisión del archivo: 50 % de decisiones (4 de 8)."));
+    assert.ok(fs.existsSync(path.join(fixture.projectRoot, "AgentOutputs", "coverage", "coverage-report.html")));
+  });
+
+  it("sin Python, la prueba se genera igual y las tres etapas dicen qué falta", async () => {
+    const model = scriptedModel();
+    const test = await generate(model.ask);
+
+    const events = await check(new PythonAdapter({ runtime: fakePythonRuntime({ interpreters: {} }) }), test, model.ask);
+
+    assert.equal(fs.existsSync(test.savedPath), true);
+    assert.deepEqual(shown(events), [
+      "Comprobación de importabilidad: notRun",
+      "Ejecución: notRun",
+      "Cobertura: notRun",
+    ]);
   });
 
   it("sin la carpeta de pruebas, se detiene antes de llamar al modelo y dice cuál crear", async () => {

@@ -5,6 +5,9 @@ import type {
   ArtifactRequest,
   ArtifactSpec,
   CapabilityMap,
+  CompletedTestRun,
+  CoverageResult,
+  CoverageTarget,
   DependencyResolution,
   DetectionContext,
   EcosystemAdapter,
@@ -14,7 +17,9 @@ import type {
   SourceText,
   SymbolCandidate,
   SymbolLocation,
+  TestExecutionResult,
   UnitTarget,
+  VerificationResult,
 } from "../../core/contracts";
 import { describePythonUnit } from "./analysis/classFacts";
 import { locatePythonSymbol } from "./analysis/locateSymbol";
@@ -23,19 +28,28 @@ import { resolvePythonDependency } from "./analysis/resolveDependency";
 import { normalizePythonCode } from "./artifact/normalizeCode";
 import { checkPythonPreconditions } from "./artifact/preconditions";
 import { specifyPythonArtifact } from "./artifact/specifyArtifact";
+import { collectPythonCoverage } from "./build/coverage";
+import { checkPythonImports } from "./build/importCheck";
+import { systemPythonRuntime, type PythonRuntime } from "./build/runtime";
+import { runPythonTests } from "./build/testRun";
 import { buildPythonProjectModel } from "./discovery/projectModel";
 import { detectPythonProject } from "./identity/detection";
 import { pythonPromptProfile } from "./profile";
 import { pythonAnalysisSchema } from "./profile/analysisSchema";
 
+export interface PythonAdapterOptions {
+  /** El Python con el que comprobar, ejecutar y medir. Por defecto, el de la máquina. */
+  readonly runtime?: PythonRuntime;
+}
+
 /**
  * Adaptador del ecosistema Python con pytest.
  *
- * Primera parte, como la de Java en `a8ed3af`: reconoce el proyecto, ubica la
- * clase y el método, le enseña pytest al modelo, le pasa a cada agente la
- * ficha de la clase y escribe la prueba en la carpeta de pruebas. Todavía no
- * comprueba la importabilidad, ni ejecuta, ni mide: las tres etapas se
- * declaran ausentes y el núcleo las muestra como «no aplica».
+ * Reconoce el proyecto, ubica la clase y el método, le enseña pytest al
+ * modelo, le pasa a cada agente la ficha de la clase y escribe la prueba en la
+ * carpeta de pruebas. Después comprueba que la prueba se pueda importar, la
+ * ejecuta con pytest y la mide con coverage, con el Python del proyecto: su
+ * entorno virtual si lo tiene, y si no, el de la máquina.
  *
  * Esta clase solo dice quién es el adaptador y qué ofrece, y le pasa cada
  * operación al componente que la resuelve. Cada carpeta es un componente con
@@ -49,32 +63,40 @@ import { pythonAnalysisSchema } from "./profile/analysisSchema";
  *   · `profile/`   — lo que se le dice al modelo: el perfil, un archivo por
  *                    prompt (OP-08), y la extensión del análisis (OP-09);
  *   · `artifact/`  — dónde va la prueba, cómo queda y qué hace falta antes de
- *                    escribirla (OP-10 a OP-12).
+ *                    escribirla (OP-10 a OP-12);
+ *   · `build/`     — comprobar, ejecutar y medir con el Python del proyecto
+ *                    (OP-13 a OP-15).
  *
  * La detección de dependencias sin modelo (OP-17) y el ciclo de vida (OP-16)
  * no están.
  *
- * Nada de aquí depende del editor de código ni de Python: recibe rutas,
- * lee archivos y devuelve datos. Para generar no hace falta tener Python
- * instalado.
+ * Nada de aquí depende del editor de código: recibe rutas y devuelve datos.
+ * Para generar no hace falta tener Python instalado; para comprobar, ejecutar
+ * y medir, sí, con pytest y coverage.
  */
 export class PythonAdapter implements EcosystemAdapter {
   readonly descriptor: AdapterDescriptor = {
     id: "python",
     displayName: "Python",
-    version: "0.1.0",
+    version: "0.2.0",
     languageIds: ["python"],
   };
 
   readonly capabilities: CapabilityMap = {
-    verification: "none",
-    runTests: false,
-    coverage: false,
+    verification: "importCheck",
+    runTests: true,
+    coverage: true,
     analysisSchemaExtension: true,
     lifecycle: false,
     dependencyDetection: false,
     unitFacts: true,
   };
+
+  private readonly runtime: PythonRuntime;
+
+  constructor(options: PythonAdapterOptions = {}) {
+    this.runtime = options.runtime ?? systemPythonRuntime;
+  }
 
   detectApplicability(context: DetectionContext): Promise<ApplicabilityResult> {
     return detectPythonProject(context);
@@ -127,5 +149,25 @@ export class PythonAdapter implements EcosystemAdapter {
     spec: ArtifactSpec
   ): Promise<readonly PreconditionViolation[]> {
     return checkPythonPreconditions(project, spec);
+  }
+
+  verifyArtifact(project: ProjectModel, spec: ArtifactSpec): Promise<VerificationResult> {
+    return checkPythonImports(project, spec, { runtime: this.runtime });
+  }
+
+  runTests(
+    project: ProjectModel,
+    spec: ArtifactSpec,
+    coverage?: CoverageTarget
+  ): Promise<TestExecutionResult> {
+    return runPythonTests(project, spec, { runtime: this.runtime }, coverage);
+  }
+
+  collectCoverage(
+    project: ProjectModel,
+    execution: CompletedTestRun,
+    target: CoverageTarget
+  ): Promise<CoverageResult> {
+    return collectPythonCoverage(project, execution, target);
   }
 }

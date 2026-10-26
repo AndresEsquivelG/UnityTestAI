@@ -379,7 +379,8 @@ function decoratorsBefore(
   return decorators;
 }
 
-function lineOf(scanned: ScannedSource, position: number): number {
+/** La línea, base 1, en la que está una posición del texto. */
+export function lineOf(scanned: ScannedSource, position: number): number {
   const { lines } = scanned;
   let low = 0;
   let high = lines.length - 1;

@@ -57,11 +57,14 @@ describe("adaptador de Python", () => {
     assert.doesNotThrow(() => new AdapterRegistry().register(new PythonAdapter()));
   });
 
-  it("declara la importabilidad, la ejecución y la cobertura como ausentes en esta primera parte", () => {
-    assert.equal(adapter.capabilities.verification, "none");
-    assert.equal(adapter.capabilities.runTests, false);
-    assert.equal(adapter.capabilities.coverage, false);
+  it("declara la importabilidad como su verificación, y la ejecución y la cobertura", () => {
+    assert.equal(adapter.capabilities.verification, "importCheck");
+    assert.equal(adapter.capabilities.runTests, true);
+    assert.equal(adapter.capabilities.coverage, true);
     assert.equal(adapter.capabilities.unitFacts, true);
+    assert.equal(typeof adapter.verifyArtifact, "function");
+    assert.equal(typeof adapter.runTests, "function");
+    assert.equal(typeof adapter.collectCoverage, "function");
   });
 
   describe("OP-02 · detección de aplicabilidad", () => {
