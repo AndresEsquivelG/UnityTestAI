@@ -15,6 +15,9 @@ export type { CheckRequest, RunRequest } from "./check";
 export { checkExistingTest, findExistingTest, locateExistingTest } from "./existing";
 export type { ExistingCheckRequest, ExistingTestLookup, ExistingTestQuery } from "./existing";
 
+export { locateUnit } from "./unit";
+export type { UnitChoice } from "./unit";
+
 export type {
   AgentStatus,
   Ask,

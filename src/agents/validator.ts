@@ -89,7 +89,7 @@ export interface ContextValidatorInput {
   /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
   profile: PromptProfile;
   assembledContext: string;
-  className: string;
+  className: string | null;
   methodName: string;
   workspaceRoot: string;
   fullContext?: boolean;
@@ -144,7 +144,7 @@ export interface TestValidatorInput {
   profile: PromptProfile;
   testCode: string;
   assembledContext: string;
-  className: string;
+  className: string | null;
   methodName: string;
   workspaceRoot: string;
 }

@@ -3,7 +3,14 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import * as fs from "fs";
 import * as fsp from "fs/promises";
 import * as path from "path";
-import { checkGeneratedTest, generateTest, type Ask, type PipelineEvent } from "../pipeline";
+import {
+  checkGeneratedTest,
+  findExistingTest,
+  generateTest,
+  type Ask,
+  type EditorSelection,
+  type PipelineEvent,
+} from "../pipeline";
 import { PythonAdapter } from "../adapters/python/pythonAdapter";
 import { createPythonFixture, type PythonFixture } from "./support/pythonFixture";
 import { fakePythonRuntime } from "./support/pythonRunOutputs";
@@ -18,6 +25,10 @@ import { fakePythonRuntime } from "./support/pythonRunOutputs";
  * el generador los recibe, la ficha llega con la línea que importa la clase, y
  * la prueba queda escrita en `tests/` sin el cercado. Después la comprueba, la
  * ejecuta y la mide con un Python de mentira (`pythonRunOutputs.ts`).
+ *
+ * También con una función sin clase (tercera parte): la ficha de la función,
+ * los prompts sin ninguna clase, el desempate por el archivo abierto y la
+ * cobertura de la función.
  */
 
 /** Lo que devolvería un modelo: con cercado. */
@@ -77,6 +88,14 @@ const SCRIPT: readonly ScriptLine[] = [
       status: "MISSING_DEPENDENCIES",
       files: ["tienda.modelo.Item"],
       codeSlice: "class Carrito:\n    def agregar(self, item):\n        self.items.append(item)",
+    }),
+  },
+  {
+    agent: "Context Builder",
+    opening: "You are a code context optimizer.",
+    response: JSON.stringify({
+      status: "READY",
+      dependencySlices: [{ filePath: "tienda/modelo.py", relevantSlice: "@dataclass\nclass Item:\n    nombre: str" }],
     }),
   },
   {
@@ -211,12 +230,17 @@ describe("pipeline entero sobre el adaptador de Python", () => {
     assert.match(model.prompts.get("Test Generator") ?? "", /\n {2}from tienda\.carrito import Carrito\n/);
   });
 
-  async function check(adapter: PythonAdapter, test: Awaited<ReturnType<typeof generate>>, ask: Ask) {
+  async function check(
+    adapter: PythonAdapter,
+    test: Awaited<ReturnType<typeof generate>>,
+    ask: Ask,
+    className: string | null = "Carrito"
+  ) {
     const events: PipelineEvent[] = [];
     await checkGeneratedTest({
       adapter,
       test,
-      className: "Carrito",
+      className,
       methodName: "agregar",
       ask,
       tokenTotals: () => ({ inputTokens: 0, outputTokens: 0 }),
@@ -274,5 +298,148 @@ describe("pipeline entero sobre el adaptador de Python", () => {
 
     await assert.rejects(generate(model.ask), /Creá la carpeta "tests"/);
     assert.equal(model.prompts.size, 0);
+  });
+
+  describe("una función sin clase", () => {
+    function generateFunction(
+      ask: Ask,
+      options: {
+        readonly methodName?: string;
+        readonly reduceContext?: boolean;
+        readonly editor?: EditorSelection;
+        readonly onEvent?: (event: PipelineEvent) => void;
+      } = {}
+    ) {
+      return generateTest({
+        adapter: new PythonAdapter(),
+        rootPath: fixture.projectRoot,
+        className: null,
+        methodName: options.methodName ?? "agregar",
+        modelId: "libreto",
+        reduceContext: options.reduceContext ?? false,
+        editor: options.editor,
+        ask,
+        onEvent: options.onEvent,
+      });
+    }
+
+    it("la prueba se llama como el módulo, y la ficha de la función llega con la línea que la importa", async () => {
+      const model = scriptedModel();
+      const test = await generateFunction(model.ask);
+
+      assert.equal(test.savedPath, path.join(fixture.testDir, "UTIA_libreto_carrito_agregar_test.py"));
+      assert.deepEqual(test.coverageTarget, { filePath: "tienda/carrito.py", unit: { className: null, methodName: "agregar" } });
+      assert.ok(test.assembledContext.startsWith("// ── TARGET: agregar ──"), test.assembledContext.slice(0, 40));
+      for (const agent of ["Code Analyzer", "Test Generator", "Test Validator"]) {
+        const prompt = model.prompts.get(agent) ?? "";
+        assert.match(prompt, /━━ FUNCTION FACTS/, agent);
+        assert.match(prompt, /Import it in the test exactly like this:\n {2}from tienda\.carrito import agregar\n/, agent);
+      }
+    });
+
+    it("ningún prompt habla de una clase bajo prueba", async () => {
+      const model = scriptedModel();
+      await generateFunction(model.ask);
+
+      assert.match(
+        model.prompts.get("Test Generator") ?? "",
+        /for the method `agregar` \(a function declared at module level, outside any class\)\./
+      );
+      assert.match(model.prompts.get("Test Generator") ?? "", /There is NO instance to create and no `self`/);
+      assert.match(model.prompts.get("Test Generator") ?? "", /Only the FUNCTION FACTS block outranks it/);
+      assert.match(
+        model.prompts.get("Code Analyzer") ?? "",
+        /Scan ALL of the following in the module that declares `agregar` and fill privateMembers:/
+      );
+      assert.equal(model.prompts.size, 5);
+      for (const [agent, prompt] of model.prompts) {
+        assert.ok(!prompt.includes("(no class)"), `${agent}: quedó el hueco de la clase`);
+        assert.ok(!/<class-name>|<method-name>|<unit/.test(prompt), `${agent}: quedó un marcador`);
+        // Quedan las menciones condicionales («si el contexto termina con un
+        // bloque CLASS FACTS…»), que sin clase no aplican: ninguna instrucción
+        // manda a copiar de ese bloque.
+        for (const line of prompt.split("\n").filter((text) => text.includes("CLASS FACTS"))) {
+          assert.match(
+            line,
+            /If the reference context ends with a CLASS FACTS block|in the CLASS FACTS block or in the assembled context/,
+            `${agent}: ${line.trim()}`
+          );
+        }
+        assert.ok(!prompt.includes("in class `"), `${agent}: nombra una clase`);
+      }
+    });
+
+    it("con «reducir contexto», no recorta: el resolutor recibe el archivo entero", async () => {
+      const model = scriptedModel();
+      const events: PipelineEvent[] = [];
+      await generateFunction(model.ask, { reduceContext: true, onEvent: (event) => events.push(event) });
+
+      assert.deepEqual(
+        events.filter((event) => event.kind === "agent" && event.agent === "Method Slicer"),
+        [{ kind: "agent", agent: "Method Slicer", status: "done", detail: "Sin clase no se recorta: se usa el archivo entero." }]
+      );
+      assert.match(model.prompts.get("Dependency Resolver") ?? "", /class Carrito:[\s\S]*def agregar\(carrito, item\):/);
+      assert.ok(model.prompts.has("Context Builder"));
+    });
+
+    it("el archivo abierto desempata entre dos funciones con el mismo nombre", async () => {
+      const model = scriptedModel();
+      const opened = path.join(fixture.packageDir, "extra", "utilidades.py");
+      const test = await generateFunction(model.ask, {
+        methodName: "formatear",
+        editor: { path: opened, code: fs.readFileSync(opened, "utf8") },
+      });
+
+      assert.equal(test.coverageTarget.filePath, "tienda/extra/utilidades.py");
+      assert.match(model.prompts.get("Test Generator") ?? "", /\n {2}from tienda\.extra\.utilidades import formatear\n/);
+
+      // «Ejecutar y medir» elige la misma, con el mismo archivo abierto.
+      const query = { adapter: new PythonAdapter(), rootPath: fixture.projectRoot, className: null, methodName: "formatear", modelId: "libreto" };
+      const existing = await findExistingTest({ ...query, editorPath: opened });
+      assert.ok(existing.found);
+      assert.equal(existing.test.coverageTarget.filePath, "tienda/extra/utilidades.py");
+      assert.match(existing.test.assembledContext, /from tienda\.extra\.utilidades import formatear/);
+
+      const withoutEditor = await findExistingTest(query);
+      assert.equal(withoutEditor.found, false);
+      assert.match(!withoutEditor.found ? withoutEditor.reason : "", /Abrí el archivo de la que querés probar/);
+    });
+
+    it("sin el archivo abierto, se detiene antes de llamar al modelo y dice dónde están", async () => {
+      const model = scriptedModel();
+
+      await assert.rejects(
+        generateFunction(model.ask, { methodName: "formatear" }),
+        /Hay una función "formatear" fuera de toda clase en 2 archivos: tienda\/extra\/utilidades\.py, tienda\/utilidades\.py\. Abrí el archivo/
+      );
+      assert.equal(model.prompts.size, 0);
+    });
+
+    it("la comprueba, la ejecuta y mide la función, y «Ejecutar y medir» la encuentra", async () => {
+      const model = scriptedModel();
+      const test = await generateFunction(model.ask);
+
+      const events = await check(new PythonAdapter({ runtime: fakePythonRuntime() }), test, model.ask, null);
+
+      assert.deepEqual(shown(events), [
+        "Comprobación de importabilidad: passed",
+        "Ejecución: passed",
+        "Cobertura: measured",
+      ]);
+      const coverage = events.find((event) => event.kind === "coverage");
+      assert.ok(coverage && coverage.kind === "coverage");
+      assert.match(coverage.presentation.summary, /^función agregar, /);
+
+      const existing = await findExistingTest({
+        adapter: new PythonAdapter(),
+        rootPath: fixture.projectRoot,
+        className: null,
+        methodName: "agregar",
+        modelId: "libreto",
+      });
+      assert.ok(existing.found);
+      assert.equal(existing.test.savedPath, test.savedPath);
+      assert.match(existing.test.assembledContext, /━━ FUNCTION FACTS/);
+    });
   });
 });

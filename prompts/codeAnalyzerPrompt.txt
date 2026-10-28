@@ -11,7 +11,7 @@ DO NOT:
 - Include types NOT directly referenced in the target method body
 
 INPUT:
-- Target method: `<method-name>` in class `<class-name>`
+- Target method: <unit>
 
 - Assembled context (target code + resolved dependencies, with section headers):
 {assembledContext}
@@ -46,7 +46,7 @@ TASK:
 
 6. PRIVATE MEMBERS — This section is CRITICAL for test generation.
 
-   Scan ALL of the following in class `<class-name>` and fill privateMembers:
+   Scan ALL of the following in <unit-scope> and fill privateMembers:
 
    {{analyzerPrivateMemberKinds}}
 

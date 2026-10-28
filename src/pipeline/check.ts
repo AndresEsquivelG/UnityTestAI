@@ -45,7 +45,7 @@ export interface CheckRequest {
   readonly adapter: EcosystemAdapter;
   /** La prueba ya escrita, con lo que hace falta para corregirla. */
   readonly test: GeneratedTest;
-  readonly className: string;
+  readonly className: string | null;
   readonly methodName: string;
   readonly ask: Ask;
   /** Tokens gastados hasta ahora: la diferencia es lo que costó cada corrección. */

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { PromptProfile } from '../core/contracts';
-import { composeTemplate } from '../core/prompts';
+import { composeTemplate, unitPlaceholders } from '../core/prompts';
 
 const PROMPTS_DIR = path.join(__dirname, "..", "prompts");
 
@@ -29,6 +29,11 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Sustituye en orden. Los nombres de la unidad (`unitPlaceholders`) van
+ * primero en cada constructor: así un `<unit>` escrito dentro del código de la
+ * persona usuaria llega literal al modelo.
+ */
 function replacePlaceholders(
   template: string,
   vars: Record<string, string>
@@ -51,8 +56,7 @@ export function buildMethodSlicerPrompt(
   code: string
 ): string {
   return replacePlaceholders(compose("methodSlicerPrompt.txt", profile), {
-    "<method-name>": methodName,
-    "<class-name>":  className,
+    ...unitPlaceholders(methodName, className),
     "{code}":        code,
   });
 }
@@ -64,13 +68,12 @@ export function buildMethodSlicerPrompt(
 export function buildDependencyResolverPrompt(
   profile: PromptProfile,
   methodName: string,
-  className: string,
+  className: string | null,
   codeSlice: string,
   projectTree: string
 ): string {
   return replacePlaceholders(compose("dependencyResolverPrompt.txt", profile), {
-    "<method-name>": methodName,
-    "<class-name>":  className,
+    ...unitPlaceholders(methodName, className),
     "{code}":        codeSlice,
     "${projectTree}": projectTree || "(Project structure not available)",
   });
@@ -83,13 +86,12 @@ export function buildDependencyResolverPrompt(
 export function buildContextBuilderPrompt(
   profile: PromptProfile,
   methodName: string,
-  className: string,
+  className: string | null,
   targetSlice: string,
   dependencyFiles: string
 ): string {
   return replacePlaceholders(compose("contextBuilderPrompt.txt", profile), {
-    "<method-name>":    methodName,
-    "<class-name>":     className,
+    ...unitPlaceholders(methodName, className),
     "{targetSlice}":    targetSlice,
     "{dependencyFiles}": dependencyFiles || "(No dependencies)",
   });
@@ -102,12 +104,11 @@ export function buildContextBuilderPrompt(
 export function buildCodeAnalyzerPrompt(
   profile: PromptProfile,
   methodName: string,
-  className: string,
+  className: string | null,
   assembledContext: string
 ): string {
   return replacePlaceholders(compose("codeAnalyzerPrompt.txt", profile), {
-    "<method-name>":      methodName,
-    "<class-name>":       className,
+    ...unitPlaceholders(methodName, className),
     "{assembledContext}": assembledContext,
   });
 }
@@ -119,7 +120,7 @@ export function buildCodeAnalyzerPrompt(
 export function buildContextValidatorPrompt(
   profile: PromptProfile,
   methodName: string,
-  className: string,
+  className: string | null,
   assembledContext: string,
   fullContext: boolean = false
 ): string {
@@ -132,8 +133,7 @@ Both forms are VALID. When a section contains a full file, treat the extra membe
     : "";
 
   return replacePlaceholders(compose("contextValidatorPrompt.txt", profile), {
-    "<method-name>":      methodName,
-    "<class-name>":       className,
+    ...unitPlaceholders(methodName, className),
     "{assembledContext}": assembledContext,
     "{fullContextNote}":  fullContextNote,
   });
@@ -147,7 +147,7 @@ Both forms are VALID. When a section contains a full file, treat the extra membe
 export function buildTestGeneratorPrompt(
   profile: PromptProfile,
   methodName: string,
-  className: string,
+  className: string | null,
   assembledContext: string,
   codeAnalysis?: string
 ): string {
@@ -156,8 +156,7 @@ export function buildTestGeneratorPrompt(
     : "";
 
   return replacePlaceholders(compose("testGeneratorPrompt.txt", profile), {
-    "<method-name>":      methodName,
-    "<class-name>":       className,
+    ...unitPlaceholders(methodName, className),
     "{assembledContext}": assembledContext,
     "{codeAnalysis}":     analysisBlock,
   });
@@ -170,13 +169,12 @@ export function buildTestGeneratorPrompt(
 export function buildTestValidatorPrompt(
   profile: PromptProfile,
   methodName: string,
-  className: string,
+  className: string | null,
   assembledContext: string,
   testCode: string
 ): string {
   return replacePlaceholders(compose("testValidatorPrompt.txt", profile), {
-    "<method-name>":      methodName,
-    "<class-name>":       className,
+    ...unitPlaceholders(methodName, className),
     "{assembledContext}": assembledContext,
     "{testCode}":         testCode,
   });
@@ -189,14 +187,13 @@ export function buildTestValidatorPrompt(
 export function buildChatFixerPrompt(
   profile: PromptProfile,
   methodName: string,
-  className: string,
+  className: string | null,
   assembledContext: string,
   testCode: string,
   userMessage: string
 ): string {
   return replacePlaceholders(compose("chatFixerPrompt.txt", profile), {
-    "<method-name>":      methodName,
-    "<class-name>":       className,
+    ...unitPlaceholders(methodName, className),
     "{assembledContext}": assembledContext,
     "{testCode}":         testCode,
     "{userMessage}":      userMessage,

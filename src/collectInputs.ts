@@ -1,7 +1,17 @@
 // src/collectInputs.ts
 import * as vscode from 'vscode';
 
-export type NameInputs = { className: string; methodName: string };
+/** `className` es `null` cuando se dejó vacía: una función sin clase. */
+export type NameInputs = { className: string | null; methodName: string };
+
+/**
+ * La clase como la manda el panel: vacía es una función sin clase. Si el
+ * ecosistema no las acepta, lo dice el pipeline (`locateUnit`), con el motivo.
+ */
+export function classNameOf(value: unknown): string | null {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text === '' ? null : text;
+}
 
 /**
  * Solicita al usuario el nombre de una clase y un método a través de la webview asociada a un panel.
@@ -11,7 +21,7 @@ export type NameInputs = { className: string; methodName: string };
  * @function collectClassAndMethod
  * @param {vscode.WebviewPanel} panel - Panel de la extensión que contiene la webview desde donde se obtendrán los datos.
  * @returns {Promise<NameInputs>} Promesa que se resuelve con un objeto que incluye `className` y `methodName`.
- * @throws {Error} Lanza un error si el usuario cancela la entrada o si los valores proporcionados están vacíos.
+ * @throws {Error} Lanza un error si el usuario cancela la entrada o si el método está vacío.
  *
  * @fires requestInputs - Se envía a la webview para solicitar los valores de clase y método.
  * @listens inputsProvided - Evento recibido cuando el usuario proporciona los valores.
@@ -28,10 +38,10 @@ export async function collectClassAndMethod(panel: vscode.WebviewPanel): Promise
         const { className, methodName } = msg;
         sub.dispose();
 
-        if (!className?.trim() || !methodName?.trim()) {
-          return reject(new Error('El nombre de la clase y el nombre del método son obligatorios.'));
+        if (!methodName?.trim()) {
+          return reject(new Error('El nombre del método es obligatorio.'));
         }
-        resolve({ className: String(className).trim(), methodName: String(methodName).trim() });
+        resolve({ className: classNameOf(className), methodName: String(methodName).trim() });
       }
 
       if (msg.command === 'inputsCancelled') {

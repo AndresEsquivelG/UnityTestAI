@@ -12,6 +12,7 @@ import {
 } from "../prompts/promptBuilder";
 import { assertPromptSnapshot } from "./support/snapshot";
 import { unityPromptProfile } from "../adapters/unity/promptProfile";
+import { pythonPromptProfile } from "../adapters/python/profile";
 import type { ProjectModel } from "../core/contracts";
 import {
   ASSEMBLED_CONTEXT,
@@ -168,6 +169,39 @@ describe("foto de los prompts", () => {
         )
       );
     });
+  });
+});
+
+/**
+ * Foto de los dos prompts que más cambian sin clase (tercera parte de Python):
+ * lo que el núcleo pone en `<unit>` y `<unit-scope>`, y los fragmentos que el
+ * perfil cambia para una función de módulo. Las fotos de arriba, con clase, no
+ * cambiaron ni una letra al agregar esas piezas.
+ */
+describe("foto de los prompts sin clase", () => {
+  const FUNCTION_NAME = "naturalsize";
+  const FUNCTION_PROFILE = pythonPromptProfile({ className: null, methodName: FUNCTION_NAME });
+  const FUNCTION_CONTEXT = [
+    "// ── TARGET: naturalsize ──────────────────────────────────────",
+    "",
+    "def naturalsize(value, binary=False):",
+    "    if binary:",
+    "        return f\"{value} KiB\"",
+    "    return f\"{value} kB\"",
+  ].join("\n");
+
+  it("analizador de código", () => {
+    assertPromptSnapshot(
+      "codeAnalyzer.sinClase",
+      buildCodeAnalyzerPrompt(FUNCTION_PROFILE, FUNCTION_NAME, null, FUNCTION_CONTEXT)
+    );
+  });
+
+  it("generador de pruebas", () => {
+    assertPromptSnapshot(
+      "testGenerator.sinClase",
+      buildTestGeneratorPrompt(FUNCTION_PROFILE, FUNCTION_NAME, null, FUNCTION_CONTEXT)
+    );
   });
 });
 

@@ -85,6 +85,7 @@ export class JavaAdapter implements EcosystemAdapter {
     lifecycle: false,
     dependencyDetection: false,
     unitFacts: true,
+    moduleLevelUnits: false,
   };
 
   private readonly toolchain: JavaBuildToolchain;

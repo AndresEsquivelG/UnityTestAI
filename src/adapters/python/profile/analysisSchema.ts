@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { AnalysisSchemaExtension } from "../../../core/contracts";
+import type { AnalysisSchemaExtension, UnitTarget } from "../../../core/contracts";
 
 /**
  * OP-09 — Extensión del esquema de análisis del ecosistema Python.
@@ -17,6 +17,11 @@ import type { AnalysisSchemaExtension } from "../../../core/contracts";
  * La forma de instanciar es texto libre y no una enumeración cerrada, por la
  * misma razón que en Java: los valores se los dicta al modelo el perfil, y un
  * valor fuera de la lista no debería tirar el análisis entero.
+ *
+ * Con una función sin clase (tercera parte), `lateAttributes` trae las
+ * variables del módulo que la prueba prepara, y la ficha que manda sobre la
+ * lista previa es FUNCTION FACTS: la presentación lo dice así. Con clase no
+ * cambia ni una letra.
  */
 
 const lateAttributeSchema = z.object({
@@ -60,7 +65,8 @@ interface PythonAnalysis {
   readonly preFlightChecklist?: z.infer<typeof preFlightSchema>;
 }
 
-export function pythonAnalysisSchema(): AnalysisSchemaExtension {
+export function pythonAnalysisSchema(unit?: UnitTarget): AnalysisSchemaExtension {
+  const moduleLevel = unit?.className === null;
   return {
     fields: {
       lateAttributes: z.array(lateAttributeSchema).optional(),
@@ -68,16 +74,22 @@ export function pythonAnalysisSchema(): AnalysisSchemaExtension {
       requiredImports: z.array(z.string()).optional(),
       preFlightChecklist: preFlightSchema.optional(),
     },
-    format: formatPythonAnalysis,
+    format: (analysis) => formatPythonAnalysis(analysis, moduleLevel),
   };
 }
 
-function formatPythonAnalysis(analysis: unknown): string {
+function formatPythonAnalysis(analysis: unknown, moduleLevel: boolean): string {
   const { lateAttributes, patchTargets, requiredImports, untestableBranches, preFlightChecklist } =
     analysis as PythonAnalysis;
   const lines: string[] = [];
 
-  if (lateAttributes && lateAttributes.length > 0) {
+  if (lateAttributes && lateAttributes.length > 0 && moduleLevel) {
+    lines.push("\nModule-level state (shared by every test — set or restore it with monkeypatch.setattr on the module):");
+    for (const variable of lateAttributes) {
+      const note = variable.notes ? ` — ${variable.notes}` : "";
+      lines.push(`  ${variable.name} [${variable.setBy}]${note}`);
+    }
+  } else if (lateAttributes && lateAttributes.length > 0) {
     lines.push("\nAttributes created outside __init__ (missing on a new instance — prepare them before the call):");
     for (const attribute of lateAttributes) {
       const note = attribute.notes ? ` — ${attribute.notes}` : "";
@@ -108,10 +120,10 @@ function formatPythonAnalysis(analysis: unknown): string {
   }
 
   if (preFlightChecklist) {
-    // La ficha de la clase (OP-18) sale del código y no de un modelo: si el
-    // analizador se equivocó, es ella la que tiene razón.
+    // La ficha de la clase o de la función (OP-18) sale del código y no de un
+    // modelo: si el analizador se equivocó, es ella la que tiene razón.
     lines.push(
-      "\n━━ PRE-FLIGHT CHECKLIST — use as ground truth, do NOT re-derive. Only the CLASS FACTS block outranks it ━━"
+      `\n━━ PRE-FLIGHT CHECKLIST — use as ground truth, do NOT re-derive. Only the ${moduleLevel ? "FUNCTION" : "CLASS"} FACTS block outranks it ━━`
     );
 
     if (preFlightChecklist.typeInstantiations.length > 0) {

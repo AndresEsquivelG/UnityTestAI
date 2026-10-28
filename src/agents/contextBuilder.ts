@@ -3,6 +3,7 @@ import * as path from "path";
 import { z } from "zod";
 import { buildContextBuilderPrompt } from "../prompts/promptBuilder";
 import type { PromptProfile } from "../core/contracts";
+import { unitLabel } from "../core/prompts";
 import type { AskOptions } from "../llm";
 import { JsonSanitizer } from "../utils/jsonSanitizer";
 
@@ -41,7 +42,7 @@ export interface ContextBuilderInput {
    * traduce una referencia a una ruta, que es conocimiento del ecosistema.
    */
   resolvedDependencyCode: string;
-  className: string;
+  className: string | null;
   methodName: string;
   workspaceRoot: string;
 }
@@ -49,12 +50,12 @@ export interface ContextBuilderInput {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function assembleFinalContext(
-  className: string,
+  className: string | null,
   methodName: string,
   targetSlice: string,
   dependencySlices: Array<{ filePath: string; relevantSlice: string }>
 ): string {
-  const header = `// ── TARGET: ${className}.${methodName} ──────────────────────────────────────`;
+  const header = `// ── TARGET: ${unitLabel(className, methodName)} ──────────────────────────────────────`;
   const parts = [header, targetSlice];
 
   for (const dep of dependencySlices) {

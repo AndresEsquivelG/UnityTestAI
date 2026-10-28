@@ -38,6 +38,9 @@ describe("cobertura del perfil sobre las plantillas neutras", () => {
     ["Unity", unityPromptProfile(projectOf("unity"))],
     ["Java", javaPromptProfile(projectOf("java"))],
     ["Python", pythonPromptProfile()],
+    // Con una función sin clase cambian unos fragmentos: tienen que seguir
+    // contestando lo mismo.
+    ["Python sin clase", pythonPromptProfile({ className: null, methodName: "naturalsize" })],
   ];
 
   function projectOf(ecosystemId: string): ProjectModel {

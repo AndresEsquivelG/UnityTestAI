@@ -18,6 +18,8 @@ describeAdapterContract({
   },
 
   knownUnit: { className: "Carrito", methodName: "agregar" },
+  // La función de módulo con el mismo nombre que el método.
+  knownModuleUnit: "agregar",
   // Con puntos y con el nombre de la clase al final, como lo escribe un
   // `import`: es la forma que el adaptador tiene que traducir a una ruta.
   knownDependency: "tienda.modelo.Item",

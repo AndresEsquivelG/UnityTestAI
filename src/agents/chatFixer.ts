@@ -29,7 +29,7 @@ export interface ChatFixerInput {
   testCode: string;
   assembledContext: string;
   userMessage: string;
-  className: string;
+  className: string | null;
   methodName: string;
   workspaceRoot: string;
   /**

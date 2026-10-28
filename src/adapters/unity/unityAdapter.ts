@@ -79,6 +79,7 @@ export class UnityAdapter implements EcosystemAdapter {
     lifecycle: false,
     dependencyDetection: true,
     unitFacts: false,
+    moduleLevelUnits: false,
   };
 
   detectApplicability(context: DetectionContext): Promise<ApplicabilityResult> {

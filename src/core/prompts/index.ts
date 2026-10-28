@@ -3,3 +3,4 @@
  */
 
 export { composeTemplate, templatePlaceholders } from "./composeTemplate";
+export { NO_CLASS, unitLabel, unitPlaceholders } from "./unit";

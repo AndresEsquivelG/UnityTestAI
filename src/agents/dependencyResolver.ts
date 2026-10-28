@@ -33,7 +33,7 @@ export interface DependencyResolverInput {
   profile: PromptProfile;
   codeSlice: string;
   projectTree: string;
-  className: string;
+  className: string | null;
   methodName: string;
   workspaceRoot: string;
 }

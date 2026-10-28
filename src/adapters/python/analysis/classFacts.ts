@@ -37,7 +37,7 @@ import {
  */
 
 /** Líneas de cuerpo que se muestran de un método que el objetivo llama y no empieza con `_`. */
-const SHORT_BODY_LINES = 12;
+export const SHORT_BODY_LINES = 12;
 
 /** Líneas de cuerpo que se muestran como máximo de cualquier método. */
 const MAX_BODY_LINES = 40;
@@ -46,7 +46,7 @@ const MAX_BODY_LINES = 40;
 const MAX_LISTED_METHODS = 40;
 
 /** Métodos con `_` que se siguen como máximo, contando los que llaman ellos. */
-const MAX_FOLLOWED = 10;
+export const MAX_FOLLOWED = 10;
 
 const NAME = String.raw`[\p{L}_][\p{L}\p{N}_]*`;
 
@@ -55,8 +55,8 @@ const ENUM_BASES = new Set(["Enum", "IntEnum", "StrEnum", "Flag", "IntFlag"]);
 
 /**
  * La ficha de `target` en el archivo `code`, o la cadena vacía si en ese
- * archivo no está la clase o no declara el método. Las funciones sin clase
- * todavía no tienen ficha: no se pueden pedir.
+ * archivo no está la clase o no declara el método. Una función sin clase
+ * tiene su propia ficha, en `functionFacts.ts`.
  */
 export function describePythonUnit(
   code: string,
@@ -292,7 +292,7 @@ function assignedValue(outline: PythonOutline, method: PythonBlock, name: string
 }
 
 /** Los nombres de los parámetros de un método, sin `self`, `cls`, `*` ni `/`. */
-function parameterNames(method: PythonBlock): string[] {
+export function parameterNames(method: PythonBlock): string[] {
   return splitTopLevel(method.parameters)
     .map((parameter) => parameter.replace(/^\*+/, "").split(/[:=]/)[0].trim())
     .filter((name) => name !== "" && name !== "self" && name !== "cls" && name !== "/");
@@ -404,7 +404,7 @@ function formatFacts(
  * primer nivel, que es la que se puede importar. Un archivo cuyo nombre no se
  * puede escribir en un `import` (`mi-script.py`) se carga con `importlib`.
  */
-function importLines(block: PythonBlock, filePath: string, importRoot: string): string[] {
+export function importLines(block: PythonBlock, filePath: string, importRoot: string): string[] {
   const moduleName = moduleNameOf(filePath, importRoot);
   const outermost = [block, ...ancestorsOf(block)].pop()!;
   const access = [...ancestorsOf(block).reverse(), block].map((owner) => owner.name).join(".");
@@ -494,7 +494,7 @@ function instantiation(info: ClassInfo, unit: PythonBlock): string {
  * nombran solo si los hay: en la primera prueba con Ctrl+F5 la ficha lo decía
  * de un `__init__` que no tenía ninguno.
  */
-function keywordOnlyNote(constructor: PythonBlock): string {
+export function keywordOnlyNote(constructor: PythonBlock): string {
   const parameters = splitTopLevel(constructor.parameters);
   const star = parameters.indexOf("*");
   if (star === -1) {
@@ -675,7 +675,7 @@ function describeCalled(outline: PythonOutline, info: ClassInfo, member: PythonB
 }
 
 /** El código de un método, sin la sangría que trae del archivo, debajo de su firma. */
-function indentBody(text: string, indent: number): string[] {
+export function indentBody(text: string, indent: number): string[] {
   const lines = text.split(/\r?\n/);
   const shown = lines
     .slice(0, MAX_BODY_LINES)
@@ -697,7 +697,7 @@ function dedent(line: string, indent: number): string {
 }
 
 /** Firma de un método con sus decoradores delante: `@staticmethod def redondear(valor)`. */
-function methodLine(method: PythonBlock): string {
+export function methodLine(method: PythonBlock): string {
   const decorators = method.decorators.map((decorator) => `@${decorator} `).join("");
   return `${decorators}${method.signature}`;
 }
@@ -707,7 +707,7 @@ function isProperty(method: PythonBlock): boolean {
 }
 
 /** Empieza con `_` y no es un método especial: interno por convención. */
-function isInternal(method: PythonBlock): boolean {
+export function isInternal(method: PythonBlock): boolean {
   return method.name.startsWith("_") && !isDunder(method.name);
 }
 

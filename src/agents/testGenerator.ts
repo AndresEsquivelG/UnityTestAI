@@ -27,7 +27,7 @@ export interface TestGeneratorInput {
   profile: PromptProfile;
   assembledContext: string;
   codeAnalysis?: string;
-  className: string;
+  className: string | null;
   methodName: string;
   workspaceRoot: string;
 }

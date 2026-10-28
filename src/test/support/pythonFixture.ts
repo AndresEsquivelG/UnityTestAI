@@ -19,7 +19,8 @@ import * as path from "path";
  *   · `Cliente` invoca `agregar` sin declararlo
  *   · `Item` (clase de datos), `Estado` (enumeración) y `Forma` (abstracta) en
  *     `tienda/modelo.py`                  → nombres con puntos y la ficha
- *   · dos `utilidades.py` en paquetes distintos → nombre ambiguo
+ *   · dos `utilidades.py` en paquetes distintos → nombre ambiguo, y la
+ *     función `formatear` en los dos → el archivo abierto desempata
  *   · `.venv/`, un entorno con otro nombre, `__pycache__/`, `build/` y
  *     `*.egg-info/` con archivos `.py`    → no son fuentes
  *   · `env/` es un paquete del proyecto, no un entorno → sí es fuente
@@ -157,6 +158,10 @@ class Cliente:
 
 const UTILIDADES = `class Utilidades:
     pass
+
+
+def formatear(valor):
+    return f"{valor:.2f}"
 `;
 
 export async function createPythonFixture(options: PythonFixtureOptions = {}): Promise<PythonFixture> {

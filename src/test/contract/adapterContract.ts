@@ -9,6 +9,7 @@ import type {
   ArtifactSpec,
   EcosystemAdapter,
   ProjectModel,
+  PromptProfile,
   SymbolCandidate,
 } from "../../core/contracts";
 import { artifactAbsolutePath, writeArtifact } from "../../core/project";
@@ -23,7 +24,9 @@ import { composeTemplate, templatePlaceholders } from "../../core/prompts";
  * excepción para alguno, la suite estaría midiendo a ese adaptador y no al
  * contrato.
  *
- * Cubre las once operaciones obligatorias. Las opcionales no entran todavía.
+ * Cubre las once operaciones obligatorias. Las opcionales no entran todavía,
+ * salvo `moduleLevelUnits`, que no es una operación sino un dato que cambia
+ * OP-05 y OP-08.
  */
 
 /** Lo único que aporta cada adaptador para correr la suite. */
@@ -35,6 +38,11 @@ export interface ContractSheet {
   createProject(): Promise<ContractProject>;
   /** Una unidad que el proyecto de ejemplo declara. */
   readonly knownUnit: { readonly className: string; readonly methodName: string };
+  /**
+   * Una función de módulo, sin clase, que el proyecto de ejemplo declara. Solo
+   * la trae el adaptador que declara `moduleLevelUnits`.
+   */
+  readonly knownModuleUnit?: string;
   /** Una dependencia que el proyecto declara, nombrada como la pediría el agente. */
   readonly knownDependency: string;
   /** Código como lo devolvería el generador, con lo que suela traer de más. */
@@ -92,6 +100,12 @@ export function describeAdapterContract(sheet: ContractSheet): void {
       // capacidades que no coinciden con lo que el adaptador implementa.
       it("el registro lo acepta", () => {
         assert.doesNotThrow(() => new AdapterRegistry().register(sheet.createAdapter()));
+      });
+
+      // pipeline/unit.ts rechaza la clase vacía si el adaptador no lo declara;
+      // si lo declara, el panel la deja vacía y OP-05 la tiene que encontrar.
+      it("declara unidades fuera de una clase si y solo si su ficha trae una", () => {
+        assert.equal(adapter.capabilities.moduleLevelUnits, sheet.knownModuleUnit !== undefined);
       });
     });
 
@@ -166,6 +180,20 @@ export function describeAdapterContract(sheet: ContractSheet): void {
         }
       });
 
+      if (sheet.knownModuleUnit !== undefined) {
+        const methodName = sheet.knownModuleUnit;
+        it("con la clase vacía, localiza la función de módulo conocida en un archivo del modelo", async () => {
+          const location = await adapter.locateSymbol(model, { className: null, methodName });
+
+          assert.ok(location.found, `no localiza ${methodName}`);
+          const sources = new Set(model.sources.map((source) => source.relativePath));
+          for (const candidate of location.candidates) {
+            assert.ok(sources.has(candidate.filePath), `${candidate.filePath} no está en el modelo`);
+            assert.ok(candidate.signature.includes(methodName), candidate.signature);
+          }
+        });
+      }
+
       // El código que leen los agentes sale de aquí.
       it("lee el archivo que indicó la localización, con la declaración adentro", async () => {
         const candidate = await locateKnown();
@@ -210,7 +238,17 @@ export function describeAdapterContract(sheet: ContractSheet): void {
       // core/prompts/composeTemplate.ts: un marcador dentro de una frase que
       // el perfil no contesta se reemplaza por nada y deja la frase rota.
       it("todas las plantillas se componen sin marcadores ni frases con huecos", () => {
-        const profile = adapter.getPromptProfile(model);
+        assertComposes(adapter.getPromptProfile(model));
+      });
+
+      if (sheet.knownModuleUnit !== undefined) {
+        const methodName = sheet.knownModuleUnit;
+        it("también con el perfil de una función de módulo", () => {
+          assertComposes(adapter.getPromptProfile(model, { className: null, methodName }));
+        });
+      }
+
+      function assertComposes(profile: PromptProfile): void {
         const answered = new Set(
           [
             ...Object.entries(profile.vocabulary),
@@ -234,7 +272,7 @@ export function describeAdapterContract(sheet: ContractSheet): void {
           assert.deepEqual(holes, [], `${name} queda con frases sin completar`);
           assert.equal(composeTemplate(template, profile).includes("{{"), false, name);
         }
-      });
+      }
     });
 
     describe("OP-10, OP-11 y OP-12 · materialización", () => {

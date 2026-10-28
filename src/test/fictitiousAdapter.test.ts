@@ -82,6 +82,7 @@ describe("adaptador ficticio", () => {
         lifecycle: false,
         dependencyDetection: false,
         unitFacts: false,
+        moduleLevelUnits: false,
       });
       for (const operation of [
         "verifyArtifact",

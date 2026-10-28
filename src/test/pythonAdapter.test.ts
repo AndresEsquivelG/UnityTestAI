@@ -62,6 +62,7 @@ describe("adaptador de Python", () => {
     assert.equal(adapter.capabilities.runTests, true);
     assert.equal(adapter.capabilities.coverage, true);
     assert.equal(adapter.capabilities.unitFacts, true);
+    assert.equal(adapter.capabilities.moduleLevelUnits, true);
     assert.equal(typeof adapter.verifyArtifact, "function");
     assert.equal(typeof adapter.runTests, "function");
     assert.equal(typeof adapter.collectCoverage, "function");
@@ -214,7 +215,25 @@ describe("adaptador de Python", () => {
 
       assert.equal(location.found, false);
       assert.match(!location.found ? location.reason : "", /clase "carrito"/);
-      assert.match(!location.found ? location.reason : "", /función "agregar" fuera de toda clase en tienda\/carrito\.py/);
+      assert.match(
+        !location.found ? location.reason : "",
+        /función "agregar" fuera de toda clase en tienda\/carrito\.py: para probarla, dejá vacía la clase\./
+      );
+    });
+
+    it("sin clase, de un archivo que la declara dos veces cuenta la última", async () => {
+      await withFixture({}, async (other) => {
+        const twice = "try:\n    import ujson\n\n    def cargar(x):\n        return ujson.loads(x)\nexcept ImportError:\n    def cargar(x):\n        return x\n";
+        await fsp.writeFile(path.join(other.packageDir, "carga.py"), twice, "utf8");
+        const model = await adapter.buildProjectModel(other.projectRoot);
+        const location = await adapter.locateSymbol(model, { className: null, methodName: "cargar" });
+
+        assert.ok(location.found);
+        assert.deepEqual(
+          location.candidates.map((candidate) => [candidate.filePath, candidate.line]),
+          [["tienda/carga.py", 7]]
+        );
+      });
     });
 
     it("si la función de módulo está en muchos archivos, como main, nombra solo algunos", async () => {
@@ -306,6 +325,39 @@ describe("adaptador de Python", () => {
       assert.match(composed, /Import it in the test exactly like this/);
     });
 
+    it("con clase el perfil es el de siempre; sin clase cambia solo las instrucciones que son de una clase", () => {
+      const always = adapter.getPromptProfile(project);
+      const method = adapter.getPromptProfile(project, { className: "Carrito", methodName: "agregar" });
+      const free = adapter.getPromptProfile(project, { className: null, methodName: "agregar" });
+
+      assert.deepEqual(method, always);
+      assert.deepEqual(free.vocabulary, always.vocabulary);
+      assert.deepEqual(Object.keys(free.fragments).sort(), Object.keys(always.fragments).sort());
+      const changed = Object.entries(free.fragments)
+        .filter(([point, text]) => text !== always.fragments[point as keyof typeof always.fragments])
+        .map(([point]) => point)
+        .sort();
+      assert.deepEqual(changed, [
+        "analyzerDefaultVisibility",
+        "analyzerLifecycleFields",
+        "analyzerNamespaces",
+        "analyzerPrivateMemberKinds",
+        "fixerImports",
+        "generatorInstantiationCheck",
+        "generatorLifecycleFields",
+        "generatorNamespaceStep",
+        "generatorPreFlightItems",
+        "generatorTestClassRules",
+        "validatorComputedProperties",
+        "validatorImports",
+      ]);
+      for (const point of changed) {
+        const text = free.fragments[point as keyof typeof free.fragments] ?? "";
+        assert.ok(!text.includes("<class-name>"), `${point} pide la clase`);
+        assert.ok(!text.includes("CLASS FACTS"), `${point} nombra la ficha de una clase`);
+      }
+    });
+
     it("el analizador tampoco sugiere una clase auxiliar con un nombre que empiece con Test", async () => {
       // En la primera prueba con Ctrl+F5 sugirió `class TestPet(Pet)`, y el generador lo copió.
       const template = await fsp.readFile(path.resolve(__dirname, "..", "prompts", "codeAnalyzerPrompt.txt"), "utf8");
@@ -358,6 +410,29 @@ describe("adaptador de Python", () => {
       assert.match(text, /Forma → helper subclass/);
       assert.match(text, /Estado → an Enum member \(Estado\.MEMBER\)/);
       assert.match(text, /Computed Properties[\s\S]*Control via: self\.items/);
+      assert.match(text, /Only the CLASS FACTS block outranks it/);
+      // Con la clase escrita, la presentación es la de siempre.
+      assert.equal(formatCodeAnalysis(parsed, adapter.extendAnalysisSchema({ className: "Carrito", methodName: "con_cupon" }).format), text);
+    });
+
+    it("sin clase, el análisis presenta el estado del módulo y la ficha de la función", () => {
+      const extension = adapter.extendAnalysisSchema({ className: null, methodName: "naturalsize" });
+      const parsed = buildCodeAnalyzerSchema(extension.fields).parse({
+        status: "READY",
+        methodSummary: { name: "naturalsize", inputs: [], output: "str" },
+        dependencies: [],
+        decisionTable: [],
+        loops: [],
+        sideEffects: [],
+        lateAttributes: [{ name: "suffixes", setBy: "module level", notes: "monkeypatch.setattr(humanize.filesize, 'suffixes', ...)" }],
+        preFlightChecklist: { typeInstantiations: [], computedProperties: [] },
+      }) as CodeAnalyzerOutput;
+
+      const text = formatCodeAnalysis(parsed, extension.format);
+
+      assert.match(text, /Module-level state \(shared by every test[^\n]*\n {2}suffixes \[module level\] — monkeypatch/);
+      assert.ok(!text.includes("self."), text);
+      assert.match(text, /Only the FUNCTION FACTS block outranks it/);
     });
   });
 

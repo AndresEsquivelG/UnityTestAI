@@ -2,7 +2,14 @@
 
 import { toggleElement } from "./domUtils.js";
 import { renderResult } from "./managers/resultRendererManager.js";
-import { getStepperState, setStepperState, applyStepUI } from "./stepper.js";
+import {
+  getStepperState,
+  setStepperState,
+  applyStepUI,
+  classStepLabel,
+  isClassOptional,
+  setClassOptional,
+} from "./stepper.js";
 import { setModels, getSelectedModel } from "./modelMenu.js";
 import { initJsonLoader } from "./managers/jsonLoaderManager.js";
 import {
@@ -109,15 +116,15 @@ setStepperState(0, "", "");
 stepInput.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   const val = stepInput.value.trim();
+  const { step, classNameVal } = getStepperState();
 
-  // Validar que el campo no esté vacío
-  if (!val) {
+  // Validar que el campo no esté vacío. La clase puede quedar vacía si el
+  // ecosistema acepta funciones sin clase.
+  if (!val && !(step === 0 && isClassOptional())) {
     stepInput.classList.add("error");
     setTimeout(() => stepInput.classList.remove("error"), 900);
     return;
   }
-
-  const { step, classNameVal } = getStepperState();
 
   // Paso 0: solicitar nombre de la clase
   if (step === 0) {
@@ -237,7 +244,10 @@ function showExistingTest(message) {
   existingTestNotice.replaceChildren();
 
   const text = document.createElement("div");
-  text.textContent = `Ya existe una prueba para el método ${message.methodName} de ${message.className}. Podés generar otra o ejecutarla y medirla, sin llamar al modelo.`;
+  const unit = message.className
+    ? `el método ${message.methodName} de ${message.className}`
+    : `la función ${message.methodName}`;
+  text.textContent = `Ya existe una prueba para ${unit}. Podés generar otra o ejecutarla y medirla, sin llamar al modelo.`;
   const file = document.createElement("span");
   file.className = "existing-test__file";
   file.textContent = message.testFile;
@@ -314,6 +324,11 @@ function showEcosystem(ecosystem) {
   ecosystemBadge.title = tooltip.join("\n");
 
   ecosystemBadge.style.display = "inline-flex";
+
+  // Si acepta funciones sin clase, la clase se puede dejar vacía. Solo cambia
+  // la etiqueta: lo que la persona ya escribió queda.
+  setClassOptional(ecosystem.moduleLevelUnits === true);
+  if (getStepperState().step === 0) stepLabel.textContent = classStepLabel();
 }
 
 /* ============================
@@ -470,10 +485,11 @@ window.addEventListener("message", (event) => {
         setStepperState(1, state.classNameVal, pending);
 
       const { classNameVal, methodNameVal } = getStepperState();
-      const hasClass = (classNameVal || "").trim().length > 0;
+      const hasClass = (classNameVal || "").trim().length > 0 || isClassOptional();
       const hasMethod = (methodNameVal || "").trim().length > 0;
 
-      // Validar que ambos valores existan antes de continuar
+      // Validar que ambos valores existan antes de continuar (la clase puede
+      // quedar vacía si el ecosistema acepta funciones sin clase)
       if (!hasClass || !hasMethod) {
         stepInput.classList.add("error");
         setTimeout(() => stepInput.classList.remove("error"), 900);

@@ -416,6 +416,7 @@ public static class Utilities
         lifecycle: false,
         dependencyDetection: true,
         unitFacts: false,
+        moduleLevelUnits: false,
       });
     });
 

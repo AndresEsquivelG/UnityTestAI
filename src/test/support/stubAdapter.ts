@@ -58,6 +58,7 @@ const NO_CAPABILITIES: CapabilityMap = {
   lifecycle: false,
   dependencyDetection: false,
   unitFacts: false,
+  moduleLevelUnits: false,
 };
 
 const NOT_APPLICABLE: ApplicabilityResult = {

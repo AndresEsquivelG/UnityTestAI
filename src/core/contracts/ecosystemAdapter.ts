@@ -156,14 +156,23 @@ export interface EcosystemAdapter {
    * descubierto y no solo del ecosistema; la justificación está en
    * `PromptProfile`. Es síncrona: todo lo que exija leer el disco se averigua en
    * OP-04 y viaja en `ProjectModel.adapterData`.
+   *
+   * `unit` llega cuando ya se sabe qué se va a probar. Un ecosistema con
+   * unidades fuera de una clase (`moduleLevelUnits`) cambia con ella las
+   * instrucciones que solo valen para una clase —cómo crear el objeto, los
+   * atributos que crea el constructor—, y así el prompt de un método no cambia
+   * ni una letra. Los demás la ignoran.
    */
-  getPromptProfile(project: ProjectModel): PromptProfile;
+  getPromptProfile(project: ProjectModel, unit?: UnitTarget): PromptProfile;
 
   /**
    * OP-09 — Extensión del esquema de análisis. OPCIONAL.
    * Presente si y solo si `capabilities.analysisSchemaExtension` es true.
+   *
+   * `unit`, como en OP-08: la presentación del análisis puede nombrar cosas
+   * que solo tiene una clase, y sin clase cambiarlas. Los demás la ignoran.
    */
-  extendAnalysisSchema?(): AnalysisSchemaExtension;
+  extendAnalysisSchema?(unit?: UnitTarget): AnalysisSchemaExtension;
 
   // ── Materialización ──────────────────────────────────────────────────────
 

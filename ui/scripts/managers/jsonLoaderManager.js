@@ -27,8 +27,10 @@ export function initJsonLoader() {
 
       // `subModel` es opcional: sin él, la extensión usa el modelo por
       // defecto del proveedor.
-      if (!config.className || !config.methodName || !config.model) {
-        throw new Error("Faltan campos obligatorios (className, methodName, model).");
+      // `className` puede faltar o ir vacía: una función sin clase. Si el
+      // ecosistema no las acepta, la extensión lo dice.
+      if (!config.methodName || !config.model) {
+        throw new Error("Faltan campos obligatorios (methodName, model).");
       }
 
       // Mostrar UI de resultado y spinner
@@ -48,7 +50,7 @@ export function initJsonLoader() {
 
       window.vscode.postMessage({
         command: "generateFromConfig",
-        className: config.className,
+        className: config.className || "",
         methodName: config.methodName,
         model: config.model,
         subModel: config.subModel || null,

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { collectClassAndMethod } from "../collectInputs";
+import { classNameOf, collectClassAndMethod } from "../collectInputs";
 import { ChatSession, type ChatMessage } from "../llm/sessionManager";
 import {
   generateWithChatGPT,
@@ -21,6 +21,7 @@ import {
   findExistingTest,
   generateTest,
   locateExistingTest,
+  locateUnit,
   runAndMeasure,
   type CheckStage,
   type EditorSelection,
@@ -37,7 +38,7 @@ const sessionsByPanel = new WeakMap<vscode.WebviewPanel, ChatSession>();
 const generationMetaByPanel = new WeakMap<
   vscode.WebviewPanel,
   {
-    className: string;
+    className: string | null;
     methodName: string;
     model: string;
     subModel: string | null;
@@ -434,7 +435,7 @@ function notifyAgent(
  * elegido, el tiempo y los tokens, y cómo se muestra cada paso.
  */
 async function handleGenerate(
-  className: string,
+  className: string | null,
   methodName: string,
   model: string,
   subModel: string | null,
@@ -507,10 +508,11 @@ async function handleGenerate(
  * botón del informe y el corrector del chat.
  */
 async function handleRunExisting(
-  className: string,
+  className: string | null,
   methodName: string,
   model: string,
   subModel: string | null,
+  editor: EditorSelection,
   panel: vscode.WebviewPanel,
   ecosystem: ActiveEcosystem,
 ) {
@@ -530,6 +532,7 @@ async function handleRunExisting(
       className,
       methodName,
       modelId: artifactModelId(model, chosen),
+      editorPath: editor.path,
     });
     if (!lookup.found) {
       panel.webview.postMessage({ command: "generationError" });
@@ -595,6 +598,8 @@ export async function createWebviewPanel(
     version: ecosystem.adapter.descriptor.version,
     confidence: ecosystem.applicability.confidence,
     evidence: ecosystem.applicability.evidence,
+    // Con esto el panel deja vacía la clase: una función sin clase.
+    moduleLevelUnits: ecosystem.adapter.capabilities.moduleLevelUnits,
   };
 
   const uiPath = path.join(context.extensionPath, "ui", "index.html");
@@ -632,17 +637,20 @@ export async function createWebviewPanel(
         const { className, methodName } = await collectClassAndMethod(panel);
 
         // OP-05 sobre el proyecto entero, en lugar de dos expresiones regulares
-        // sobre el archivo abierto. El motivo del fallo lo redacta el adaptador.
+        // sobre el archivo abierto. El motivo del fallo lo redacta el adaptador,
+        // o el pipeline si la clase vacía no vale o la función está repetida.
         const project = await ecosystem.adapter.buildProjectModel(
           ecosystem.rootPath,
         );
-        const location = await ecosystem.adapter.locateSymbol(project, {
-          className,
-          methodName,
-        });
+        const choice = await locateUnit(
+          ecosystem.adapter,
+          project,
+          { className, methodName },
+          editor.path,
+        );
 
-        if (!location.found) {
-          vscode.window.showErrorMessage(location.reason);
+        if (!choice.found) {
+          vscode.window.showErrorMessage(choice.reason);
           panel.webview.postMessage({ command: "resetInputs" });
           return;
         }
@@ -655,7 +663,7 @@ export async function createWebviewPanel(
                 ecosystem.adapter,
                 project,
                 { className, methodName },
-                location.candidates[0],
+                choice.location,
                 artifactModelId(
                   message.model,
                   chosenModel(message.model, message.subModel),
@@ -693,10 +701,10 @@ export async function createWebviewPanel(
         // No se localiza aquí: `handleGenerate` lo hace de todos modos porque
         // necesita la declaración para especificar el artefacto, y repetirlo
         // sería recorrer el proyecto dos veces.
-        const { className, methodName, model, subModel } = message;
+        const { methodName, model, subModel } = message;
         const reduceContext = message.reduceContext !== false;
         await handleGenerate(
-          className,
+          classNameOf(message.className),
           methodName,
           model,
           subModel,
@@ -731,6 +739,7 @@ export async function createWebviewPanel(
           methodName,
           message.model,
           message.subModel ?? null,
+          editor,
           panel,
           ecosystem,
         );

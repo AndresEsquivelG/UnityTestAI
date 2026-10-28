@@ -29,8 +29,9 @@ const MAX_LISTED_FILES = 3;
  *   · sin clase, solo cuentan las funciones de módulo.
  *
  * En Python no hay sobrecargas: la segunda declaración con el mismo nombre
- * reemplaza a la primera. Puede haber varias candidatas igual, si dos módulos
- * declaran una clase con el mismo nombre; elegir entre ellas es de quien llama.
+ * reemplaza a la primera, así que de cada archivo cuenta la última. Puede haber
+ * varias candidatas igual, si dos módulos declaran una clase o una función con
+ * el mismo nombre; elegir entre ellas es de quien llama.
  */
 export async function locatePythonSymbol(
   project: ProjectModel,
@@ -67,7 +68,12 @@ export async function locatePythonSymbol(
     const functions = moduleFunctions(outline).filter((block) => block.name === methodName);
 
     if (className === null) {
-      candidates.push(...functions.map(toCandidate));
+      // Un `def` repetido en el módulo (uno en cada rama de un `try`, por
+      // ejemplo): la que queda definida es la última.
+      const last = functions[functions.length - 1];
+      if (last) {
+        candidates.push(toCandidate(last));
+      }
       continue;
     }
 
@@ -98,15 +104,15 @@ export async function locatePythonSymbol(
     return { found: true, candidates: [first, ...rest] };
   }
 
-  // Todavía no se puede pedir una función de módulo: el panel exige una clase.
-  // Si la hay, se dice dónde, para que el aviso no parezca un error de nombre.
-  // Un nombre como `main` puede estar en muchos archivos: se nombran algunos.
+  // Si se pidió con clase y hay una función de módulo con ese nombre, se dice
+  // dónde y cómo pedirla, para que el aviso no parezca un error de nombre. Un
+  // nombre como `main` puede estar en muchos archivos: se nombran algunos.
   const shown = moduleLevel.slice(0, MAX_LISTED_FILES).join(", ");
   const more = moduleLevel.length > MAX_LISTED_FILES ? ` y ${moduleLevel.length - MAX_LISTED_FILES} más` : "";
   const freeFunction =
     moduleLevel.length > 0
       ? ` Hay una función "${methodName}" fuera de toda clase en ${shown}${more}: ` +
-        `las funciones sin clase todavía no se pueden pedir.`
+        `para probarla, dejá vacía la clase.`
       : "";
 
   if (className !== null && !classDeclared) {

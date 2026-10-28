@@ -1,7 +1,7 @@
 You are a static code dependency analyzer. You respond ONLY with raw JSON. No markdown, no explanations, no code fences.
 
 Goal:
-Identify ONLY the external project files required to understand the target method `<method-name>` in class `<class-name>`.
+Identify ONLY the external project files required to understand the target method <unit>.
 
 STRICT RULES:
 - DO NOT generate tests
@@ -18,7 +18,7 @@ STRICT RULES:
   - Direct member access on external project types
 
 INPUT:
-Code slice for method `<method-name>` in class `<class-name>`:
+Code slice for method <unit>:
 {code}
 
 Project Structure:

@@ -110,10 +110,22 @@ export interface CapabilityMap {
   readonly dependencyDetection: boolean;
   /** OP-18 — ficha de la unidad leída del código, que se suma al contexto de los agentes. */
   readonly unitFacts: boolean;
+  /**
+   * Unidades fuera de una clase: el ecosistema acepta `className: null` en
+   * OP-05, como las funciones de módulo de Python. En Java y C# todo método
+   * pertenece a un tipo.
+   *
+   * Es la única clave que no promete una operación: es un dato. Lo lee el
+   * panel, para dejar vacía la clase, y el núcleo, para rechazar la clase
+   * vacía donde no se declara. Sin él, el localizador de Java buscaba el
+   * método en cualquier clase y tomaba el primero sin avisar.
+   */
+  readonly moduleLevelUnits: boolean;
 }
 
 /**
  * Operaciones opcionales de la interfaz. Se derivan del mapa de capacidades
- * para que ambas listas no puedan divergir.
+ * para que ambas listas no puedan divergir; `moduleLevelUnits` queda afuera
+ * porque no es una operación.
  */
-export type OptionalOperation = keyof CapabilityMap;
+export type OptionalOperation = Exclude<keyof CapabilityMap, "moduleLevelUnits">;

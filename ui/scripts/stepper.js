@@ -31,6 +31,39 @@ let classNameVal = "";
 let methodNameVal = "";
 
 /**
+ * Si la clase se puede dejar vacía: el ecosistema acepta funciones sin clase
+ * (`moduleLevelUnits`, que manda la extensión con el ecosistema detectado).
+ * @type {boolean}
+ */
+let classOptional = false;
+
+/**
+ * Indica si la clase se puede dejar vacía.
+ * @returns {boolean}
+ */
+export function isClassOptional() {
+  return classOptional;
+}
+
+/**
+ * Fija si la clase se puede dejar vacía.
+ * @param {boolean} optional
+ */
+export function setClassOptional(optional) {
+  classOptional = optional;
+}
+
+/**
+ * Etiqueta del paso de la clase.
+ * @returns {string}
+ */
+export function classStepLabel() {
+  return classOptional
+    ? "Nombre de la clase (vacío si es una función suelta)"
+    : "Nombre de la clase";
+}
+
+/**
  * Obtiene el estado actual del stepper.
  * 
  * @returns {{ step: number, classNameVal: string, methodNameVal: string }}
@@ -94,7 +127,7 @@ export function applyStepUI(
 
     // Configurar etiquetas y placeholders según el paso
     if (stepNum === 0) {
-      stepLabel.textContent = "Nombre de la clase";
+      stepLabel.textContent = classStepLabel();
       stepInput.placeholder = "Utilities";
       stepInput.value = classNameVal;
     } else {

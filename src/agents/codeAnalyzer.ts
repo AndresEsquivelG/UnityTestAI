@@ -121,7 +121,7 @@ export interface CodeAnalyzerInput {
    */
   schemaFields?: ZodRawShape;
   assembledContext: string;
-  className: string;
+  className: string | null;
   methodName: string;
   workspaceRoot: string;
 }

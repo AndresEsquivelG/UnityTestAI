@@ -14,6 +14,7 @@ import {
   verificationStageName,
 } from "../core/verification";
 import { saveAgentOutput } from "../agents/agentOutputSaver";
+import { unitLabel } from "../core/prompts";
 import { runAndMeasure } from "./check";
 import type { PipelineEvent } from "./events";
 import {
@@ -22,6 +23,7 @@ import {
   withUnitFacts,
   type GeneratedTest,
 } from "./generate";
+import { locateUnit } from "./unit";
 
 /**
  * Ejecutar y medir una prueba que ya está escrita, sin generarla de nuevo.
@@ -40,10 +42,13 @@ export interface ExistingTestQuery {
   readonly adapter: EcosystemAdapter;
   /** Raíz desde la que el adaptador construye el modelo (OP-04). */
   readonly rootPath: string;
-  readonly className: string;
+  /** `null` para una función sin clase, como en la generación. */
+  readonly className: string | null;
   readonly methodName: string;
   /** El modelo de lenguaje entra en el nombre del archivo de la prueba. */
   readonly modelId: string;
+  /** Archivo abierto: desempata entre funciones sin clase, como al generar. */
+  readonly editorPath?: string;
 }
 
 export type ExistingTestLookup =
@@ -79,18 +84,18 @@ export async function findExistingTest(query: ExistingTestQuery): Promise<Existi
   const target: UnitTarget = { className, methodName };
 
   const project = await adapter.buildProjectModel(query.rootPath);
-  const location = await adapter.locateSymbol(project, target);
-  if (!location.found) {
-    return { found: false, reason: location.reason };
+  // La misma declaración que elige la generación.
+  const choice = await locateUnit(adapter, project, target, query.editorPath);
+  if (!choice.found) {
+    return choice;
   }
-  // La misma candidata que toma la generación ante sobrecargas.
-  const [targetLocation] = location.candidates;
+  const targetLocation = choice.location;
 
   const existing = locateExistingTest(adapter, project, target, targetLocation, modelId);
   if (!existing) {
     return {
       found: false,
-      reason: `No hay una prueba de ${className}.${methodName} generada con ${modelId}: generala primero.`,
+      reason: `No hay una prueba de ${unitLabel(className, methodName)} generada con ${modelId}: generala primero.`,
     };
   }
 
@@ -110,7 +115,7 @@ export async function findExistingTest(query: ExistingTestQuery): Promise<Existi
       savedPath: artifactAbsolutePath(project, spec),
       project,
       spec,
-      profile: adapter.getPromptProfile(project),
+      profile: adapter.getPromptProfile(project, target),
       coverageTarget: { filePath: targetLocation.filePath, unit: target },
     },
   };

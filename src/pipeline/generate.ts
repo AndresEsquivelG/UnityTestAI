@@ -1,4 +1,3 @@
-import * as path from "path";
 import {
   supportsDependencyDetection,
   supportsSchemaExtension,
@@ -29,7 +28,9 @@ import { runTestGenerator } from "../agents/testGenerator";
 import { runCodeAnalyzer } from "../agents/codeAnalyzer";
 import { formatCodeAnalysis } from "../agents/analysisText";
 import { saveAgentOutput } from "../agents/agentOutputSaver";
+import { unitLabel } from "../core/prompts";
 import type { AgentStatus, Ask, PipelineEvent } from "./events";
+import { absolutePath, locateUnit, samePath } from "./unit";
 
 /** Archivo abierto con el que se invocó el comando. */
 export interface EditorSelection {
@@ -43,13 +44,17 @@ export interface GenerationRequest {
   readonly adapter: EcosystemAdapter;
   /** Raíz desde la que el adaptador construye el modelo (OP-04). */
   readonly rootPath: string;
-  readonly className: string;
+  /** `null` para una función sin clase, si el adaptador declara `moduleLevelUnits`. */
+  readonly className: string | null;
   readonly methodName: string;
   /** Identificador del modelo de lenguaje, que puede entrar en el nombre del artefacto. */
   readonly modelId: string;
   /** Con recorte: el recortador y el constructor de contexto achican lo que ve el modelo. */
   readonly reduceContext: boolean;
-  /** Archivo abierto, si lo hay: su texto gana al del disco cuando es el de la unidad. */
+  /**
+   * Archivo abierto, si lo hay: su texto gana al del disco cuando es el de la
+   * unidad, y desempata entre funciones sin clase con el mismo nombre.
+   */
   readonly editor?: EditorSelection;
   readonly ask: Ask;
   readonly onEvent?: (event: PipelineEvent) => void;
@@ -99,13 +104,11 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
 
   // ── OP-05: localización de la unidad bajo prueba ─────────────────────────
   const target: UnitTarget = { className, methodName };
-  const location = await adapter.locateSymbol(project, target);
-  if (!location.found) {
-    throw new Error(location.reason);
+  const choice = await locateUnit(adapter, project, target, editor?.path);
+  if (!choice.found) {
+    throw new Error(choice.reason);
   }
-  // Ante sobrecargas se toma la primera; elegir entre las firmas es trabajo
-  // de la interfaz y todavía no hay dónde preguntarlo.
-  const [targetLocation] = location.candidates;
+  const targetLocation = choice.location;
 
   // ── OP-10 y OP-12: destino y precondiciones ──────────────────────────────
   // Se comprueban antes de la primera llamada al modelo. Antes se comprobaba
@@ -136,16 +139,16 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
   }
 
   // ── OP-08: perfil con el que se componen las plantillas neutras ──────────
-  // Se pide una sola vez por corrida: depende del proyecto descubierto y ese
-  // no cambia a mitad del pipeline.
-  const profile = adapter.getPromptProfile(project);
+  // Se pide una sola vez por corrida: depende del proyecto descubierto y de la
+  // unidad, y ninguno de los dos cambia a mitad del pipeline.
+  const profile = adapter.getPromptProfile(project, target);
 
   // ── OP-09: extensión del esquema de análisis, si el adaptador la ofrece ──
   // Se pregunta por la capacidad declarada, nunca por el identificador del
   // ecosistema. Un adaptador que no la declare recorre el mismo camino con la
   // extensión ausente, sin ninguna condición más.
   const analysisSchema = supportsSchemaExtension(adapter)
-    ? adapter.extendAnalysisSchema()
+    ? adapter.extendAnalysisSchema(target)
     : undefined;
 
   // ── Step 0: Method Slicer ──────────────────────────────────────────────
@@ -154,10 +157,14 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
   // cortar la generación por eso tiraba todo lo demás. Pasó con
   // qwen2.5-coder:14b, que devolvió un JSON roto (2026-10-26). Es una falla
   // blanda, como la del validador de contexto: queda a la vista y se sigue.
+  //
+  // Sin clase no se recorta: la plantilla pide la declaración de la clase y
+  // el constructor, y una función de módulo no tiene ninguno de los dos.
+  // Enseñarle a recortar funciones queda para después.
   let codeSlice = targetCode;
   let sliced = false;
-  if (reduceContext) {
-    const slicerAgent = "Method Slicer";
+  const slicerAgent = "Method Slicer";
+  if (reduceContext && className !== null) {
     notifyAgent(slicerAgent, "running");
     const slicerResult = await runMethodSlicer(
       {
@@ -182,6 +189,8 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
       codeSlice = slicerResult.codeSlice.join("\n");
       sliced = true;
     }
+  } else if (reduceContext) {
+    notifyAgent(slicerAgent, "done", "Sin clase no se recorta: se usa el archivo entero.");
   }
 
   // ── Step 1: Dependency Resolver ──────────────────────────────────────────
@@ -449,23 +458,6 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
 }
 
 /**
- * Compara dos rutas absolutas del mismo sistema de archivos.
- *
- * En Windows y macOS el nombre no distingue mayúsculas, y la ruta que entrega el
- * editor puede diferir en la letra de unidad de la que se compone aquí. Un
- * empate de más solo haría usar el texto del editor en lugar del disco; un
- * empate de menos, al contrario.
- */
-function samePath(a: string, b: string): boolean {
-  const left = path.resolve(a);
-  const right = path.resolve(b);
-  if (process.platform === "win32" || process.platform === "darwin") {
-    return left.toLowerCase() === right.toLowerCase();
-  }
-  return left === right;
-}
-
-/**
  * La ficha de la unidad, si el adaptador la ofrece. Complementa al contexto:
  * si falla, se sigue sin ella y el error queda en el volcado.
  */
@@ -497,12 +489,12 @@ function unfixedIssues(issues: readonly string[]): string {
 }
 
 export function buildFullContext(
-  className: string,
+  className: string | null,
   methodName: string,
   targetCode: string,
   dependencyFiles: readonly ResolvedDependency[],
 ): string {
-  const header = `// ── TARGET: ${className}.${methodName} ──────────────────────────────────────`;
+  const header = `// ── TARGET: ${unitLabel(className, methodName)} ──────────────────────────────────────`;
   const parts = [header, targetCode];
 
   for (const dep of dependencyFiles) {
@@ -532,10 +524,7 @@ async function readTargetCode(
   editor: EditorSelection | undefined,
   location: SymbolCandidate,
 ): Promise<string> {
-  const declaredIn = path.join(
-    project.rootPath,
-    ...location.filePath.split("/"),
-  );
+  const declaredIn = absolutePath(project, location.filePath);
   if (editor && samePath(declaredIn, editor.path)) {
     return editor.code;
   }

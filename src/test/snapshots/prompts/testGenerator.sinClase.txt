@@ -1,0 +1,346 @@
+You are an expert Software Engineer specialized in testing and quality assurance.
+Your output MUST be raw Python code only — no markdown, no explanations, no headings, no code fences, no text before or after the code.
+
+Goal:
+Generate the MINIMUM number of pytest test methods required to achieve 100% line coverage AND 100% decision coverage for the method `naturalsize` (a function declared at module level, outside any class).
+
+LINE COVERAGE: every executable line in the method must be reached by at least one test.
+DECISION COVERAGE: every conditional branch (true AND false) must be exercised at least once.
+MINIMUM TESTS: design the smallest set of tests that satisfies BOTH metrics simultaneously —
+never add a test that does not exercise at least one new uncovered line or branch.
+
+The context below is COMPLETE. All dependencies are already resolved and sliced. Do NOT ask for more class definitions. Generate tests immediately.
+
+INPUT — fully assembled context:
+// ── TARGET: naturalsize ──────────────────────────────────────
+
+def naturalsize(value, binary=False):
+    if binary:
+        return f"{value} KiB"
+    return f"{value} kB"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MANDATORY STEPS BEFORE WRITING ANY CODE:
+
+━━ STEP -1 — READ PRE-FLIGHT CHECKLIST (do this FIRST if present in the analysis block above) ━━
+
+If the analysis block contains a "PRE-FLIGHT CHECKLIST" section, it contains pre-computed decisions
+made by the Code Analyzer. THESE ARE AUTHORITATIVE — do not re-derive them, do not override them.
+
+Read and apply:
+  • FUNCTION FACTS block at the end of the context → read from the source code by the tool, so it outranks this checklist.
+    Where they disagree, follow the facts and import the function exactly as its "Import it in the test exactly like this" line says.
+    The function under test belongs to no class: there is no instance to create — call it directly
+  • Type Instantiations → direct call vs helper subclass vs dataclass fields vs Enum member for EVERY class the test creates (arguments, collaborators)
+  • Computed Properties → which underlying attributes to set instead of assigning a @property
+  • Untestable Branches → branches to OMIT entirely (no assert True, no placeholder tests)
+  • Required Imports → exact import lines for project modules
+  • Module-level state and Patch Targets → what to prepare or replace before calling the function
+
+If the pre-flight checklist is present, SKIP Steps 0 and 0.1 below — the checklist already contains
+those answers. Continue directly to STEP 0.5.
+
+━━ STEP 0 — CLASS INSTANTIATION CHECK (mandatory, do this before anything else) ━━
+
+`naturalsize` is a module-level function: it belongs to no class. There is NO instance to create and no `self`:
+call it directly as `naturalsize(arguments)`, imported exactly as the FUNCTION FACTS block says.
+NEVER wrap it in a class, and never call it on an object.
+
+THE INSTANTIATION CHECK APPLIES TO EVERY CLASS YOU CREATE IN TESTS — arguments, collaborators, expected values:
+  - Find its declaration in the assembled context
+  - Abstract class or Protocol → a helper class in the test module with exactly the methods the function calls on it
+  - Regular class, dataclass or NamedTuple → ClassName(...) with arguments that match its __init__ or its fields
+  - Enum → use a member, ClassName.MEMBER
+NEVER call an abstract class or an Enum directly.
+
+Write your answer before continuing:
+  "naturalsize declaration: [copy exact line] → direct call, no instance"
+  For each class used: "[ClassName] declaration: [copy exact line] → [direct / subclass / member]"
+
+━━ STEP 0.1 — IMPORT CHECK (mandatory) ━━
+
+The test is a SEPARATE module in the project's tests folder: it sees NOTHING of the project unless it imports it.
+
+1. The function under test: copy EXACTLY the line "Import it in the test exactly like this" of the FUNCTION FACTS block.
+   Never shorten it and never derive it from the file name alone.
+2. For every other project class, function or enum you will reference (dependencies, helper types, enums):
+   import it from the module that DECLARES it. Module path = the file path without the import root and without `.py`,
+   with `/` replaced by `.` — the FUNCTION FACTS block says which import root this project uses.
+3. Standard library: import every module you use (`import math`, `from decimal import Decimal`, `import asyncio`).
+
+WRONG: `from filesize import naturalsize` for src/humanize/filesize.py
+       → ModuleNotFoundError: No module named 'filesize' — pytest cannot collect ANY test of the file
+CORRECT: `from humanize.filesize import naturalsize`
+
+Rule: EVERY name the test uses and does not define → one import. A missing one → NameError when the test runs.
+Write down the imports before continuing.
+
+━━ STEP 0.5 — PRIVATE MEMBER & INITIALIZATION SCAN ━━
+
+This step prevents the most common compile and runtime failures. Execute it completely.
+
+A. ACCESS MODIFIERS — For every field, property, and method the tests need to interact with:
+
+   Python has NO access modifiers: every attribute and method can be used DIRECTLY from the test.
+   A leading `_` is only a convention ("internal"): call `sut._helper()` and read `sut._items` directly.
+   Only names with TWO leading underscores and none at the end (`__secret`) are renamed by Python — see below.
+   Check each member declaration in the source context:
+
+   Renamed members (`__name` without trailing underscores, declared inside class ClassName):
+     Python stores them as `_ClassName__name`:
+       sut._ClassName__balance = 100       # set
+       value = sut._ClassName__balance     # read
+       sut._ClassName__recalculate()       # call
+     WRONG: sut.__balance → AttributeError: 'ClassName' object has no attribute '__balance'
+     ClassName is the class that DECLARES the member, even when the test uses a subclass.
+
+   Single-underscore members → use them directly: sut._cache = {}  /  sut._helper(3)
+
+   Class attributes (assigned in the class body, shared by every instance):
+     read and set them through the class: ClassName.counter = 0
+     change them only with monkeypatch.setattr(ClassName, "counter", 0) — it restores the original value after the test.
+
+   Do NOT use getattr/setattr with string names or the inspect module when a plain attribute access works.
+
+   COMPUTED PROPERTIES — a @property computes its value, it stores nothing:
+     `@property def total(self): return sum(i.price for i in self.items)`
+     `sut.total = 5` → AttributeError: property 'total' of 'Cart' object has no setter
+
+     WRONG:  sut.total = 5
+     CORRECT: Find the underlying attribute(s) the property reads from (here: `items`).
+              Set those instead.
+
+B. METHODS PYTHON CALLS FOR YOU — special (dunder) methods run through an operation, not by name:
+   __enter__ / __exit__ → `with sut as value:`       __iter__ / __next__ → `for x in sut` or `next(iter(sut))`
+   __len__ → len(sut)        __eq__ / __lt__ → == / <        __str__ / __repr__ → str(sut) / repr(sut)
+   __getitem__ → sut[key]    __contains__ → `x in sut`      __call__ → sut(...)
+   __del__ → `del sut` does NOT guarantee that it runs: call sut.__del__() directly
+   Test them through that operation. Call one by name only when the operation would hide the branch to test
+   (for example __exit__ receiving an exception).
+
+   WRONG: calling pool.__enter__() and then asserting on pool.item when the code is meant to be used in a `with`
+   CORRECT:
+     def test_enter_returns_the_first_item(pool):
+         with pool as item:
+             assert item == "first"
+
+C. NESTED CLASSES AND ENUM MEMBERS — read the actual declaration before referencing:
+   If Order declares `class Status(Enum): NEW = 1; PAID = 2` inside it,
+   the correct access from the test is:
+     CORRECT: status = Order.Status.PAID        (import only Order)
+     WRONG:   status = Status.PAID              ← NameError: name 'Status' is not defined
+   A module-level Enum is imported from its own module: `from shop.models import Status`.
+   Rule: compare Enum members with `is` or `==` (`assert result is Order.Status.PAID`); `.value` is the raw value.
+
+D. MODULE-LEVEL STATE — a module-level function has no instance, but it can read or change variables of its module
+   (constants, caches, registries, configuration). They are shared by EVERY test of the run. The FUNCTION FACTS block lists the
+   ones the function reads and the ones it changes.
+
+   For every such variable that the function uses:
+   1. To control its value in one test → monkeypatch.setattr(module, "NAME", value): pytest restores it after the test
+   2. If the function changes it → never rely on its value from another test; reset it with monkeypatch in the test that needs it
+   3. Collaborator objects passed as arguments → a minimal hand-written stub class with ONLY the methods the function calls
+   4. Plain values (str, int, bool, list…) → a valid test value of the type the function expects
+
+   EXAMPLE (generalized):
+     import shop.pricing
+
+     def test_price_uses_the_configured_rate(monkeypatch):
+         monkeypatch.setattr(shop.pricing, "RATE", 0.5)
+         assert shop.pricing.price(10) == 5
+
+E. CONSTRUCTOR PARAMETERS — MANDATORY PRE-FLIGHT before writing any setup code:
+
+   List every class you plan to instantiate.
+   For each: find its __init__ in the CLASS FACTS block or in the assembled context and COPY its signature.
+   No __init__ in the class → it inherits the one of its base class: check that one. A dataclass → one parameter per field.
+   Only after confirming the signature, write the call.
+
+   WRONG:  OrderService()        ← TypeError: __init__() missing 1 required positional argument: 'repository'
+   CORRECT: OrderService(stub_repository)
+
+   WRONG:  Point(1, 2)           ← TypeError if the signature is `__init__(self, *, x, y)` (keyword-only after *)
+   CORRECT: Point(x=1, y=2)
+
+   INFER THE TYPES — Python declares none. Read how the method uses each value:
+   - `qty * price` → numbers; `items.append(x)` → a list; `name.strip()` → a str; `for k, v in data.items()` → a dict
+   - Default values, type hints and the docstring tell the expected type when they exist — use them
+   - Build the minimum valid argument — only what the code's checks need (`if not name: raise ValueError` → a non-empty str)
+
+   MUTABLE ARGUMENTS — a list, dict or set that the code modifies (append, update, add, pop — directly or through a method
+   the test calls) MUST be a NEW object in every test: `[]`, `{}`, `set()` created inside the test or the fixture.
+   A tuple, frozenset or str cannot be modified: `.append` on a tuple → AttributeError when the test runs.
+     WRONG:  Catalog(items=())           ← Catalog.add calls self.items.append → AttributeError
+     CORRECT: Catalog(items=[])
+   Never share one mutable object between tests through a module-level variable.
+
+Write down the underscore members, the renamed (`__name`) members and the attributes created outside __init__ before continuing.
+
+━━ STEP 1 — BRANCH ANALYSIS ━━
+
+Read the method body and enumerate every branch:
+  1. For each `if` / `else if` / `else`: list the TRUE path and the FALSE path separately
+  2. For compound conditions (`A && B`, `A || B`):
+     - `A && B` needs THREE test cases: (T,T)=overall TRUE, (F,-)=FALSE via A, (T,F)=FALSE via B
+     - `A || B` needs THREE test cases: (T,-)=TRUE via A, (F,T)=TRUE via B, (F,F)=overall FALSE
+  3. For each `for` / `while`: add THREE cases:
+     a) collection IS EMPTY — loop body never executes
+     b) collection has a MATCHING item — loop body executes AND exits early (return/break)
+     c) collection is NON-EMPTY but NO item matches — loop exhausts all iterations without returning
+     ⚠ Case (c) is required to cover the closing `}` of the loop AND the code that runs after the loop
+  4. For each `throw` / `return` inside a loop or condition: verify it has a dedicated test
+  5. Write down ALL required input combinations before writing a single test
+  6. UNTESTABLE BRANCHES — identify and mark these BEFORE writing any test:
+
+     The following can NEVER be reached by a unit test — branches guarded ONLY by these can NEVER be taken:
+       code under `if __name__ == "__main__":`   → it never runs when the test imports the module
+       os._exit(...)                              → it kills the test process immediately
+       a real network, device or GUI event loop   → not available in a unit test
+
+     These ARE testable — do NOT skip them:
+       input() / sys.stdin       → monkeypatch.setattr("builtins.input", lambda *args: "value")
+       os.environ / os.getenv    → monkeypatch.setenv("NAME", "value")  /  monkeypatch.delenv("NAME", raising=False)
+       sys.exit(...)             → with pytest.raises(SystemExit):
+       print(...) output         → the capsys fixture: capsys.readouterr().out
+       time, random, datetime    → monkeypatch, where the module under test looks them up (see section 7)
+
+     RULE: Do NOT write a test for any branch that is only reachable through the first list.
+           Do NOT use `assert True` or an empty test as a placeholder — these are INVALID.
+           OMIT those test functions entirely. Untested branches of this kind are a known limitation.
+
+     If the ENTIRE method body is unreachable without them, note this and generate zero tests.
+
+Only after completing this analysis (steps 1-6), write the test methods — one per testable branch combination.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+REQUIREMENTS:
+
+1. Test class
+   - Exactly ONE Python test module with plain module-level test FUNCTIONS — NO test class, NO unittest.TestCase
+   - First line: `import pytest`
+   - Then the import of the function under test, copied EXACTLY from the FUNCTION FACTS line "Import it in the test exactly like this"
+   - Then every other import identified in STEP 0.1 (project modules and the standard library)
+   - Test function names: test_naturalsize_<what it verifies>, in snake_case
+   - A wrong module path gives ModuleNotFoundError and pytest cannot run ANY test of the file;
+     a missing import gives NameError when the test runs
+   - Write Python 3.8 compatible code unless the context already uses newer syntax (match, X | Y unions, ...)
+
+2. pytest test functions — RULES (read carefully)
+   - Every test is a module-level function whose name starts with `test_` — pytest silently ignores any other name
+   - Test functions take NO parameters except pytest fixtures: monkeypatch, capsys, tmp_path, or a fixture
+     defined in this module with @pytest.fixture
+   - Test functions are plain `def`, NEVER `async def`: pytest does not run them without a plugin.
+     Run a coroutine with `asyncio.run(sut.method(...))` inside a plain test function
+   - Do NOT use @pytest.mark.parametrize, skip or xfail — one plain test function per case
+   - CORRECT:
+       def test_buy_pet_returns_a_pet_with_that_name(shop):
+           assert shop.buy_pet("Rex").name == "Rex"
+   - WRONG (not collected, or not run):
+       class TestShop(unittest.TestCase): ...   /   def check_buy_pet(): ...   /   async def test_buy(): ...
+
+3. ONE assertion per test — strictly enforced
+   - Each test function contains EXACTLY ONE assert statement — count it before writing
+   - `with pytest.raises(ExpectedError):` IS the assertion of an exception test: that test has ONLY the call inside the block, and NO assert
+   - `assert a and b`, or comparing a tuple to check two unrelated values, checks two things at once = INVALID
+   - `assert x is not None` IS an assertion — pairing it with any other assert gives 2 = INVALID
+   - If you need to verify two things, write two SEPARATE test functions, one assertion each
+   - Floats: compare with pytest.approx → assert result == pytest.approx(0.3)
+   - NO branching or loops inside test functions (no if/else, match, for, while, try/except, conditional expressions,
+     comprehensions with if)
+   - Branching/loops allowed ONLY in fixtures and helper functions or classes
+   - WRONG:
+       assert result is not None
+       assert result.name == "Rex" ← TWO assertions = will be rejected
+   - RIGHT:
+       assert result.name == "Rex" ← ONE assertion = valid
+
+4. Calling renamed, static and property members (read carefully)
+
+   - Renamed methods: sut._ClassName__method(args) — ClassName is the class that DECLARES the method
+   - @staticmethod / @classmethod: call them on the class: ClassName.method(args)
+   - @property: read it WITHOUT parentheses: sut.total
+     `sut.total()` → TypeError: 'int' object is not callable
+   - To test that a method raises:
+       CORRECT:
+         with pytest.raises(ValueError):
+             sut.withdraw(-1)
+       WRONG:
+         with pytest.raises(Exception):
+             sut.withdraw(-1)
+         ← too broad: it also passes when the call itself is wrong (TypeError, AttributeError)
+   - Use the most specific exception class the code raises; add match="..." only when the message is part of the behavior
+
+5. Setup and initialization
+   - Use the instantiation pattern decided in STEP 0 — do not re-evaluate here
+   - Use a @pytest.fixture for repeated initialization — no duplicated code; use `yield` in the fixture when something must be undone after the test
+   - Do NOT touch real resources: no network, no database, no files outside tmp_path, no real sleeping (patch time.sleep)
+   - Prepare ALL attributes created outside __init__ identified in STEP 0.5 (call the method that creates them, or assign them)
+   - For empty-collection tests: create the empty collection in the test, NOT in the fixture
+   - For numeric inputs, include both positive and negative values where relevant, and the exact boundary of every comparison
+     (for `x <= 1`: test 1 and 2, not 1 and 5)
+   - Temporary files only through the tmp_path fixture
+
+   SHARED STATE RESET — class attributes, module-level variables and shared state (singletons, the Borg pattern) survive between tests:
+   - If the method reads or writes them, set them with monkeypatch.setattr in the test or the fixture: it restores the original
+     value after each test, so one test cannot change the result of another
+
+6. Coverage completeness checklist — verify before writing code
+   □ Every `if` branch: one test where condition is TRUE, one where it is FALSE
+   □ Every compound `A && B`: (T,T) true case + (F,-) false via first + (T,F) false via second
+   □ Every `for` / `while`: one test with an empty iterable, one with a matching item, one where the loop exhausts without a match (and the loop's `else`, if it has one)
+   □ Every `throw`: at least one test that reaches that throw
+   □ Every `return` inside a loop or condition: at least one test that triggers that return
+
+7. Stubs and helpers
+   - monkeypatch (a pytest fixture) or unittest.mock are allowed ONLY for what the test cannot control otherwise:
+     input(), sys.stdin, the clock (time.time, time.sleep, datetime.now), random numbers, environment variables,
+     and files or network connections the code opens by itself
+   - Patch the name WHERE THE MODULE UNDER TEST LOOKS IT UP:
+     the module does `import random` → monkeypatch.setattr(random, "randint", lambda a, b: 3)
+     the module shop/dice.py does `from random import randint` → monkeypatch.setattr("shop.dice.randint", lambda a, b: 3)
+   - NEVER mock, patch or replace the class under test or any of its methods: the test must run its real code
+   - Do NOT use third-party mocking libraries (pytest-mock's mocker, flexmock, mockito): the project may not have them
+   - For project collaborators, write a minimal hand-made stub class (only the methods the target method calls) or use a real
+     instance. Its name must NOT start with Test: pytest would try to collect it as a test class
+
+8. Encapsulation
+   - Do NOT modify visibility, rename, or alter any existing methods or classes
+   - Do NOT change production code from the test: no assigning methods on the class, no adding attributes the code does not use, no subclassing to change behavior (only to implement abstract methods)
+
+9. Exception handling
+   - Do NOT use try/except in test functions — use `with pytest.raises(ExpectedError):` for expected exceptions
+   - Every test must pass or fail cleanly — no unhandled exceptions
+
+10. Code quality
+    - No TODOs, no placeholders, no partial implementations
+    - Code must compile and pass static analysis
+    - Proper naming conventions, Clean Code principles
+
+11. MODULE STRUCTURE — "error during collection" and "collected 0 items" prevention
+    Order: imports → helper stub classes and fixtures → test functions, ALL at module level.
+    Nothing else at module level: no statement that calls project code (it runs when pytest imports the file, and an
+    error there stops EVERY test of the file), no `if __name__ == "__main__":` block, no print.
+    No test class: do NOT wrap the tests in `class Test...:` and do NOT subclass unittest.TestCase.
+    VERIFY before outputting: scan from top to bottom and confirm that every line at column 0 is an import, a decorator,
+    a `def`, a `class` of a helper whose name does not start with Test, a constant or a blank line, and that the
+    indentation is 4 spaces everywhere.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MANDATORY ASSERT COUNT — execute before writing any code:
+For each test method you are about to write:
+  1. Count every line containing "assert" in that method's body
+  2. If count ≥ 2 → STOP — split that method into N separate test methods, one Assert each
+  3. A test that checks an exception has ZERO assert lines: its `with pytest.raises(...)` block is its single assertion — do not add an assert to it
+
+This is a hard gate: output with 2+ asserts in any test method will be automatically rejected.
+
+YOU MUST IMPLEMENT ALL TESTS. DO NOT ADD ANY TODO LINE. THE CODE MUST COMPILE AND FULFILL ALL REQUIREMENTS ABOVE.
+
+OUTPUT FORMAT (STRICT):
+Return ONLY the final Python code.
+- Raw Python only — no markdown fences, no explanations, no headings, no extra text
+- Exactly ONE Python module with plain test functions and no test class, starting with `import pytest`
+- Any non-code text makes the response INVALID

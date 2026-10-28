@@ -99,6 +99,7 @@ export function presentCoverage(
 
     case "measured": {
       const unit = target.unit.methodName;
+      const kind = target.unit.className === null ? "función" : "método";
       const details = outcome.byFile.map(
         (file) => `Archivo ${file.filePath}: ${describeMetric(file.line)}.`
       );
@@ -112,7 +113,7 @@ export function presentCoverage(
         stageName,
         status: outcome.status,
         summary: outcome.target
-          ? `método ${unit}, ${describeMetric(outcome.target.line)}.`
+          ? `${kind} ${unit}, ${describeMetric(outcome.target.line)}.`
           : `no se encontró código medible de ${unit} en el archivo.`,
         diagnostics: [],
         details,

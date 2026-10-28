@@ -22,6 +22,7 @@ import type {
   VerificationResult,
 } from "../../core/contracts";
 import { describePythonUnit } from "./analysis/classFacts";
+import { describePythonFunction } from "./analysis/functionFacts";
 import { locatePythonSymbol } from "./analysis/locateSymbol";
 import { readPythonSource } from "./analysis/readSource";
 import { resolvePythonDependency } from "./analysis/resolveDependency";
@@ -45,9 +46,9 @@ export interface PythonAdapterOptions {
 /**
  * Adaptador del ecosistema Python con pytest.
  *
- * Reconoce el proyecto, ubica la clase y el método, le enseña pytest al
- * modelo, le pasa a cada agente la ficha de la clase y escribe la prueba en la
- * carpeta de pruebas. Después comprueba que la prueba se pueda importar, la
+ * Reconoce el proyecto, ubica el método de una clase o una función de módulo,
+ * le enseña pytest al modelo, le pasa a cada agente la ficha de la clase o de
+ * la función y escribe la prueba en la carpeta de pruebas. Después comprueba que la prueba se pueda importar, la
  * ejecuta con pytest y la mide con coverage, con el Python del proyecto: su
  * entorno virtual si lo tiene, y si no, el de la máquina.
  *
@@ -59,7 +60,7 @@ export interface PythonAdapterOptions {
  *   · `discovery/` — dónde está cada cosa: convenciones y modelo (OP-04);
  *   · `source/`    — cómo se lee Python, para los demás componentes;
  *   · `analysis/`  — la unidad, su código y sus dependencias (OP-05 a OP-07),
- *                    y la ficha de la clase (OP-18);
+ *                    y la ficha de la clase o de la función (OP-18);
  *   · `profile/`   — lo que se le dice al modelo: el perfil, un archivo por
  *                    prompt (OP-08), y la extensión del análisis (OP-09);
  *   · `artifact/`  — dónde va la prueba, cómo queda y qué hace falta antes de
@@ -90,6 +91,7 @@ export class PythonAdapter implements EcosystemAdapter {
     lifecycle: false,
     dependencyDetection: false,
     unitFacts: true,
+    moduleLevelUnits: true,
   };
 
   private readonly runtime: PythonRuntime;
@@ -124,16 +126,23 @@ export class PythonAdapter implements EcosystemAdapter {
     location: SymbolCandidate,
     project: ProjectModel
   ): string {
-    return describePythonUnit(code, target, location, project);
+    return target.className === null
+      ? describePythonFunction(code, target, location, project)
+      : describePythonUnit(code, target, location, project);
   }
 
-  /** No depende del proyecto: la carpeta desde la que se importa la dice la ficha. */
-  getPromptProfile(_project: ProjectModel): PromptProfile {
-    return pythonPromptProfile();
+  /**
+   * No depende del proyecto: la carpeta desde la que se importa la dice la
+   * ficha. Depende de la unidad: una función sin clase cambia las
+   * instrucciones que solo valen para una clase.
+   */
+  getPromptProfile(_project: ProjectModel, unit?: UnitTarget): PromptProfile {
+    return pythonPromptProfile(unit);
   }
 
-  extendAnalysisSchema(): AnalysisSchemaExtension {
-    return pythonAnalysisSchema();
+  /** Como el perfil: sin clase, el análisis se presenta para una función. */
+  extendAnalysisSchema(unit?: UnitTarget): AnalysisSchemaExtension {
+    return pythonAnalysisSchema(unit);
   }
 
   specifyArtifact(request: ArtifactRequest): ArtifactSpec {
