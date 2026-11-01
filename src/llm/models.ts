@@ -31,6 +31,7 @@ export const CLAUDE_MODELS: readonly ModelChoice[] = [
 /** Los de la página de modelos de OpenAI al 2026-10-23, del más barato al más capaz. */
 export const OPENAI_MODELS: readonly ModelChoice[] = [
   { id: "gpt-6-luna", label: "GPT-6 Luna" },
+  { id: "gpt-6.1-terra", label: "GPT-6.1 Terra"},
   { id: "gpt-6.1-sol", label: "GPT-6.1 Sol" },
   { id: "gpt-6-astra", label: "GPT-6 Astra" },
 ];

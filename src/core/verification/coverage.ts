@@ -113,7 +113,7 @@ export function presentCoverage(
         stageName,
         status: outcome.status,
         summary: outcome.target
-          ? `${kind} ${unit}, ${describeMetric(outcome.target.line)}.`
+          ? `${kind} ${unit}, ${describeMetric(outcome.target.line)}; ${describeOptional("decisión", outcome.target.decision, "decisiones", "no tiene condiciones")}`
           : `no se encontró código medible de ${unit} en el archivo.`,
         diagnostics: [],
         details,

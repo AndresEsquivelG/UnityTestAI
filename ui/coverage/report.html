@@ -155,6 +155,13 @@
           return card(label, percent(metric), counts(metric, counted));
         }
 
+        // Las mismas tres formas, para una celda de la tabla.
+        function decisionCell(metric) {
+          if (!metric) return "no disponible";
+          if (metric.total === 0) return "sin condiciones";
+          return percent(metric) + " · " + metric.covered + " de " + metric.total;
+        }
+
         function card(label, value, detail) {
           var node = el("div", "card");
           node.appendChild(el("div", "card__label", label));
@@ -176,6 +183,11 @@
             ? card("Método bajo prueba", percent(data.target.line), counts(data.target.line, "líneas"))
             : card("Método bajo prueba", "—", "Sin código medible con ese nombre")
         );
+        if (data.target) {
+          cards.appendChild(
+            optionalCard("Decisión del método", data.target.decision, "decisiones", "No tiene condiciones")
+          );
+        }
         cards.appendChild(card("Archivo", percent(data.line), counts(data.line, "líneas")));
         cards.appendChild(
           optionalCard("Decisión del archivo", data.decision, "decisiones", "No tiene condiciones")
@@ -198,7 +210,7 @@
 
           var table = el("table");
           var head = el("tr");
-          ["Método", "Línea", "Cobertura", ""].forEach(function (title) {
+          ["Método", "Línea", "Cobertura de línea", "", "Cobertura de decisión"].forEach(function (title) {
             head.appendChild(el("th", "", title));
           });
           table.appendChild(head);
@@ -214,6 +226,7 @@
             bar.appendChild(fill);
             barCell.appendChild(bar);
             row.appendChild(barCell);
+            row.appendChild(el("td", "num", decisionCell(unit.decision)));
             table.appendChild(row);
           });
           var tableWrap = el("div", "scroll");

@@ -22,7 +22,12 @@ export interface CoverageDocument {
   readonly generatedAt: string;
   /** Nombre de la prueba generada. */
   readonly testName: string;
-  readonly target?: { readonly name: string; readonly line: CoverageMetric };
+  readonly target?: {
+    readonly name: string;
+    readonly line: CoverageMetric;
+    /** Ausente quiere decir «no disponible». */
+    readonly decision?: CoverageMetric;
+  };
   readonly line: CoverageMetric;
   /** Ausente quiere decir «no disponible». */
   readonly decision?: CoverageMetric;
@@ -39,6 +44,8 @@ export interface CoverageDocumentFile {
     readonly name: string;
     readonly firstLine: number;
     readonly line: CoverageMetric;
+    /** Ausente quiere decir «no disponible». */
+    readonly decision?: CoverageMetric;
     readonly isTarget: boolean;
   }[];
   /** El archivo entero, con el estado de las líneas que tienen código medible. */
@@ -90,6 +97,7 @@ export async function buildCoverageDocument(
         name: unit.name,
         firstLine: unit.firstLine,
         line: unit.line,
+        ...(unit.decision ? { decision: unit.decision } : {}),
         isTarget: unit.name === report.target?.name,
       })),
       source,
@@ -101,7 +109,15 @@ export async function buildCoverageDocument(
     title: `Cobertura de ${unitLabel}`,
     generatedAt: now.toISOString(),
     testName,
-    ...(report.target ? { target: { name: report.target.name, line: report.target.line } } : {}),
+    ...(report.target
+      ? {
+          target: {
+            name: report.target.name,
+            line: report.target.line,
+            ...(report.target.decision ? { decision: report.target.decision } : {}),
+          },
+        }
+      : {}),
     line: report.line,
     ...(report.decision ? { decision: report.decision } : {}),
     ...(report.instruction ? { instruction: report.instruction } : {}),

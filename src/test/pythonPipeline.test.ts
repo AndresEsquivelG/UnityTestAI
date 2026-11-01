@@ -273,7 +273,7 @@ describe("pipeline entero sobre el adaptador de Python", () => {
     assert.deepEqual(runtime.steps(), ["review", "collect", "coverageRun", "coverageJson"]);
     const coverage = events.find((event) => event.kind === "coverage");
     assert.ok(coverage && coverage.kind === "coverage");
-    assert.equal(coverage.presentation.summary, "método agregar, 90 % de líneas (9 de 10).");
+    assert.equal(coverage.presentation.summary, "método agregar, 90 % de líneas (9 de 10); decisión: 66,7 % de decisiones (4 de 6).");
     assert.ok(coverage.presentation.details?.includes("Decisión del archivo: 50 % de decisiones (4 de 8)."));
     assert.ok(fs.existsSync(path.join(fixture.projectRoot, "AgentOutputs", "coverage", "coverage-report.html")));
   });

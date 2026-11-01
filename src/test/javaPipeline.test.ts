@@ -287,7 +287,7 @@ describe("pipeline entero sobre el adaptador de Java", () => {
     assert.equal(toolchain.runs.length, 2);
     const coverage = events.find((event) => event.kind === "coverage");
     assert.ok(coverage && coverage.kind === "coverage");
-    assert.equal(coverage.presentation.summary, "método agregar, 66,7 % de líneas (2 de 3).");
+    assert.equal(coverage.presentation.summary, "método agregar, 66,7 % de líneas (2 de 3); decisión: 50 % de decisiones (1 de 2).");
     assert.ok(coverage.presentation.details?.includes("Decisión del archivo: 50 % de decisiones (1 de 2)."));
     assert.ok(fs.existsSync(path.join(fixture.projectRoot, "AgentOutputs", "coverage", "coverage-report.html")));
   });

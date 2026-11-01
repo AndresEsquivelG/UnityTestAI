@@ -8,6 +8,7 @@ import * as vm from "vm";
 import type {
   ArtifactSpec,
   CoverageMeasured,
+  CoverageMetric,
   CoverageResult,
   CoverageTarget,
   ProjectModel,
@@ -181,7 +182,7 @@ describe("presentación de la cobertura", () => {
 
     assert.equal(presentation.stageName, "Cobertura");
     assert.equal(presentation.status, "measured");
-    assert.equal(presentation.summary, "método Divide, 66,7 % de líneas (2 de 3).");
+    assert.equal(presentation.summary, "método Divide, 66,7 % de líneas (2 de 3); decisión: no disponible.");
     assert.deepEqual(presentation.details, [
       "Archivo src/calculo.x: 25 % de líneas (2 de 8).",
       "Decisión del archivo: no disponible.",
@@ -211,6 +212,29 @@ describe("presentación de la cobertura", () => {
     );
 
     assert.ok(presentation.details?.includes("Decisión del archivo: no tiene condiciones."));
+  });
+
+  it("el resumen da la decisión de la unidad, nunca la del archivo", () => {
+    const decisionDelArchivo = { covered: 1, total: 4, percentage: 25 };
+    const withUnitDecision = (decision?: CoverageMetric) =>
+      presentCoverage(
+        {
+          ...MEASURED,
+          decision: decisionDelArchivo,
+          target: { ...MEASURED.target!, ...(decision ? { decision } : {}) },
+        },
+        TARGET
+      ).summary;
+
+    assert.equal(
+      withUnitDecision({ covered: 15, total: 16, percentage: 93.8 }),
+      "método Divide, 66,7 % de líneas (2 de 3); decisión: 93,8 % de decisiones (15 de 16)."
+    );
+    assert.equal(
+      withUnitDecision({ covered: 0, total: 0, percentage: 0 }),
+      "método Divide, 66,7 % de líneas (2 de 3); decisión: no tiene condiciones."
+    );
+    assert.equal(withUnitDecision(), "método Divide, 66,7 % de líneas (2 de 3); decisión: no disponible.");
   });
 
   it("si no encontró la unidad, lo dice en vez de mostrar la cifra del archivo como suya", () => {
@@ -283,6 +307,68 @@ describe("informe HTML de la cobertura", () => {
         ["Calculo.Divide", true],
       ]
     );
+  });
+
+  const WITH_UNIT_DECISION: CoverageMeasured = {
+    ...MEASURED,
+    decision: { covered: 3, total: 44, percentage: 6.8 },
+    byFile: [
+      {
+        ...MEASURED.byFile[0],
+        units: [
+          { name: "Calculo.Suma", firstLine: 2, line: { covered: 0, total: 5, percentage: 0 }, decision: { covered: 0, total: 0, percentage: 0 } },
+          { name: "Calculo.Divide", firstLine: 8, line: { covered: 2, total: 3, percentage: 66.7 }, decision: { covered: 15, total: 16, percentage: 93.8 } },
+        ],
+      },
+    ],
+    target: { name: "Calculo.Divide", firstLine: 8, line: { covered: 2, total: 3, percentage: 66.7 }, decision: { covered: 15, total: 16, percentage: 93.8 } },
+  };
+
+  it("lleva la decisión de la unidad bajo prueba y de cada método", async () => {
+    const document = await buildCoverageDocument(project, WITH_UNIT_DECISION, TARGET, "prueba");
+
+    assert.deepEqual(document.target?.decision, { covered: 15, total: 16, percentage: 93.8 });
+    assert.deepEqual(
+      document.files[0].units.map((unit) => unit.decision?.total),
+      [0, 16]
+    );
+  });
+
+  it("sin decisión medida, la unidad y los métodos no llevan ninguna", async () => {
+    const document = await buildCoverageDocument(project, MEASURED, TARGET, "prueba");
+
+    assert.ok(!("decision" in (document.target ?? {})));
+    assert.ok(document.files[0].units.every((unit) => !("decision" in unit)));
+  });
+
+  it("la plantilla muestra la decisión del método y la de cada fila de la tabla", async () => {
+    const document = await buildCoverageDocument(project, WITH_UNIT_DECISION, TARGET, "prueba");
+    const { texts } = renderWithFakeDom(renderCoverageDocument(template, document));
+
+    const card = texts.indexOf("Decisión del método");
+    assert.deepEqual(texts.slice(card, card + 3), ["Decisión del método", "93,8 %", "15 de 16 decisiones"]);
+    assert.ok(texts.includes("Cobertura de decisión"));
+    assert.ok(texts.includes("93,8 % · 15 de 16"), "la fila de Divide");
+    assert.ok(texts.includes("sin condiciones"), "la fila de Suma: midió y no había nada que cubrir");
+    assert.ok(!texts.includes("no disponible"));
+  });
+
+  it("sin decisión medida, la plantilla dice «No disponible» en la tarjeta y en cada fila", async () => {
+    const document = await buildCoverageDocument(project, MEASURED, TARGET, "prueba");
+    const { texts } = renderWithFakeDom(renderCoverageDocument(template, document));
+
+    const card = texts.indexOf("Decisión del método");
+    assert.deepEqual(texts.slice(card, card + 3), ["Decisión del método", "No disponible", "La herramienta no la mide"]);
+    assert.equal(texts.filter((text) => text === "no disponible").length, 2, "una por cada método");
+  });
+
+  it("sin la unidad, la plantilla no inventa una tarjeta de decisión con la cifra del archivo", async () => {
+    const { target: _omitted, ...withoutTarget } = WITH_UNIT_DECISION;
+    const document = await buildCoverageDocument(project, withoutTarget, TARGET, "prueba");
+    const { texts } = renderWithFakeDom(renderCoverageDocument(template, document));
+
+    assert.ok(!texts.includes("Decisión del método"));
+    assert.ok(texts.includes("Decisión del archivo"));
   });
 
   it("si no puede leer el archivo, lo dice y arma el resto", async () => {
