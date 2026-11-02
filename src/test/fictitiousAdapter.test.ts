@@ -340,6 +340,7 @@ describe("adaptador ficticio", () => {
   describe("OP-08 · perfil de prompt", () => {
     const TEMPLATES = [
       "methodSlicerPrompt.txt",
+      "functionSlicerPrompt.txt",
       "dependencyResolverPrompt.txt",
       "contextBuilderPrompt.txt",
       "contextValidatorPrompt.txt",

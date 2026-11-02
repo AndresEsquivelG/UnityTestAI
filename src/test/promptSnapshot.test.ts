@@ -173,7 +173,7 @@ describe("foto de los prompts", () => {
 });
 
 /**
- * Foto de los dos prompts que más cambian sin clase (tercera parte de Python):
+ * Foto de los tres prompts que más cambian sin clase (tercera parte de Python):
  * lo que el núcleo pone en `<unit>` y `<unit-scope>`, y los fragmentos que el
  * perfil cambia para una función de módulo. Las fotos de arriba, con clase, no
  * cambiaron ni una letra al agregar esas piezas.
@@ -189,6 +189,18 @@ describe("foto de los prompts sin clase", () => {
     "        return f\"{value} KiB\"",
     "    return f\"{value} kB\"",
   ].join("\n");
+
+  it("cortador de métodos", () => {
+    assertPromptSnapshot(
+      "methodSlicer.sinClase",
+      buildMethodSlicerPrompt(
+        FUNCTION_PROFILE,
+        FUNCTION_NAME,
+        null,
+        ["UNITS = 1024", "", "def naturalsize(value, binary=False):", "    return value / UNITS"].join("\n")
+      )
+    );
+  });
 
   it("analizador de código", () => {
     assertPromptSnapshot(

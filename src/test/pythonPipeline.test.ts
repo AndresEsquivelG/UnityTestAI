@@ -82,6 +82,11 @@ interface ScriptLine {
 
 const SCRIPT: readonly ScriptLine[] = [
   {
+    agent: "Method Slicer",
+    opening: "You are a code extraction engine.",
+    response: JSON.stringify({ status: "READY", codeSlice: ["def agregar(carrito, item):", "    carrito.agregar(item)"] }),
+  },
+  {
     agent: "Dependency Resolver",
     opening: "You are a static code dependency analyzer.",
     response: JSON.stringify({
@@ -122,8 +127,11 @@ const SCRIPT: readonly ScriptLine[] = [
 
 const COVERAGE_TEMPLATE = path.resolve(__dirname, "..", "..", "ui", "coverage", "report.html");
 
-/** Modelo de libreto que además guarda el prompt que recibió cada agente. */
-function scriptedModel() {
+/**
+ * Modelo de libreto que además guarda el prompt que recibió cada agente.
+ * `slicerResponse` cambia lo que contesta el recortador.
+ */
+function scriptedModel(slicerResponse?: string) {
   const prompts = new Map<string, string>();
   const ask: Ask = async (prompt) => {
     const line = SCRIPT.find(({ opening }) => prompt.startsWith(opening));
@@ -131,9 +139,15 @@ function scriptedModel() {
       throw new Error(`Prompt que el libreto no conoce: ${prompt.slice(0, 80)}`);
     }
     prompts.set(line.agent, prompt);
-    return line.response;
+    return line.agent === "Method Slicer" && slicerResponse !== undefined ? slicerResponse : line.response;
   };
   return { ask, prompts };
+}
+
+/** Los estados por los que pasó el recortador, con su último detalle. */
+function slicerSteps(events: readonly PipelineEvent[]) {
+  const steps = events.flatMap((event) => (event.kind === "agent" && event.agent === "Method Slicer" ? [event] : []));
+  return { statuses: steps.map((step) => step.status), detail: steps.at(-1)?.detail };
 }
 
 describe("pipeline entero sobre el adaptador de Python", () => {
@@ -369,17 +383,78 @@ describe("pipeline entero sobre el adaptador de Python", () => {
       }
     });
 
-    it("con «reducir contexto», no recorta: el resolutor recibe el archivo entero", async () => {
+    it("con «reducir contexto», recorta con su plantilla: el resolutor recibe el recorte", async () => {
       const model = scriptedModel();
       const events: PipelineEvent[] = [];
       await generateFunction(model.ask, { reduceContext: true, onEvent: (event) => events.push(event) });
 
-      assert.deepEqual(
-        events.filter((event) => event.kind === "agent" && event.agent === "Method Slicer"),
-        [{ kind: "agent", agent: "Method Slicer", status: "done", detail: "Sin clase no se recorta: se usa el archivo entero." }]
-      );
-      assert.match(model.prompts.get("Dependency Resolver") ?? "", /class Carrito:[\s\S]*def agregar\(carrito, item\):/);
+      assert.deepEqual(slicerSteps(events).statuses, ["running", "done"]);
+
+      const slicer = model.prompts.get("Method Slicer") ?? "";
+      assert.match(slicer, /Extract a minimal code slice for the target function `agregar`, declared at module level/);
+      assert.match(slicer, /module-level `try` or `if` block/);
+      assert.match(slicer, /"def target_function\(value\):"/);
+      assert.ok(!slicer.includes("Class signature"), "pidió la declaración de una clase");
+      assert.ok(!slicer.includes("(no class)"), "quedó el hueco de la clase");
+
+      const resolver = model.prompts.get("Dependency Resolver") ?? "";
+      assert.match(resolver, /def agregar\(carrito, item\):/);
+      assert.ok(!resolver.includes("class Carrito:"), "el resolutor recibió el archivo entero");
       assert.ok(model.prompts.has("Context Builder"));
+    });
+
+    it("la ficha sale del archivo entero, aunque el código llegue recortado", async () => {
+      const model = scriptedModel(JSON.stringify({ status: "READY", codeSlice: ["def agregar(recortado):", "    pass"] }));
+      await generateFunction(model.ask, { reduceContext: true });
+
+      const generator = model.prompts.get("Test Generator") ?? "";
+      assert.match(generator, /Declaration: .*agregar\(carrito, item\)/);
+      assert.ok(generator.includes("def agregar(recortado):"), "el generador no recibió el recorte");
+    });
+
+    it("si la respuesta del recortador es ilegible, sigue con el archivo entero y lo avisa", async () => {
+      const model = scriptedModel('{"status": "READY", "codeSlice": ["a" "b"]}');
+      const events: PipelineEvent[] = [];
+      const test = await generateFunction(model.ask, { reduceContext: true, onEvent: (event) => events.push(event) });
+
+      const { statuses, detail } = slicerSteps(events);
+      assert.deepEqual(statuses, ["running", "error"]);
+      assert.match(detail ?? "", /^Failed to parse LLM response as valid JSON: .*\. Se sigue con el archivo entero, sin recortar\.$/);
+      assert.match(model.prompts.get("Dependency Resolver") ?? "", /class Carrito:[\s\S]*def agregar\(carrito, item\):/);
+      assert.ok(fs.existsSync(test.savedPath));
+    });
+
+    it("si el recorte no trae la función, sigue con el archivo entero y lo avisa", async () => {
+      const model = scriptedModel(JSON.stringify({ status: "READY", codeSlice: ["from decimal import Decimal"] }));
+      const events: PipelineEvent[] = [];
+      const test = await generateFunction(model.ask, { reduceContext: true, onEvent: (event) => events.push(event) });
+
+      const { statuses, detail } = slicerSteps(events);
+      assert.deepEqual(statuses, ["running", "error"]);
+      assert.equal(detail, "El recorte no trae la función agregar. Se sigue con el archivo entero, sin recortar.");
+
+      const resolver = model.prompts.get("Dependency Resolver") ?? "";
+      assert.match(resolver, /class Carrito:[\s\S]*def agregar\(carrito, item\):/);
+      assert.ok(fs.existsSync(test.savedPath));
+    });
+
+    it("con clase, sigue su plantilla y el recorte no se revisa", async () => {
+      const model = scriptedModel(JSON.stringify({ status: "READY", codeSlice: ["class SinElMetodo:", "    pass"] }));
+      const events: PipelineEvent[] = [];
+      await generateTest({
+        adapter: new PythonAdapter(),
+        rootPath: fixture.projectRoot,
+        className: "Carrito",
+        methodName: "agregar",
+        modelId: "libreto",
+        reduceContext: true,
+        ask: model.ask,
+        onEvent: (event) => events.push(event),
+      });
+
+      assert.match(model.prompts.get("Method Slicer") ?? "", /Class signature: the class declaration line/);
+      assert.deepEqual(slicerSteps(events).statuses, ["running", "done"]);
+      assert.match(model.prompts.get("Dependency Resolver") ?? "", /class SinElMetodo:/);
     });
 
     it("el archivo abierto desempata entre dos funciones con el mismo nombre", async () => {

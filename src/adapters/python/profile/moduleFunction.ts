@@ -5,14 +5,38 @@ import type { PythonFragments } from "./fragments";
  * módulo, sin clase (HU-24, tercera parte).
  *
  * Cada fragmento reemplaza al del mismo nombre de los otros archivos, y solo
- * esos: cómo crear el objeto bajo prueba, los nombres que Python cambia dentro
- * de una clase, los atributos que `__init__` no crea y el nombre del bloque de
- * la ficha, que sin clase es FUNCTION FACTS. Todo lo demás —pytest, una
+ * esos: lo que conserva el recorte, cómo crear el objeto bajo prueba, los
+ * nombres que Python cambia dentro de una clase, los atributos que `__init__`
+ * no crea y el nombre del bloque de la ficha, que sin clase es FUNCTION FACTS.
+ * Todo lo demás —pytest, una
  * aserción por prueba, las clases auxiliares, `monkeypatch`— vale igual para
  * una función. Con clase no se usa ninguno, así que el prompt de un método no
  * cambia ni una letra (decidido por Andrés el 2026-10-26).
  */
 export const MODULE_FUNCTION_FRAGMENTS = {
+  // ── Recortador ─────────────────────────────────────────────────────────────
+
+  /**
+   * Una importación dentro de un `try` elige entre dos bibliotecas, y lo que
+   * define ese bloque se usa como cualquier otro nombre del módulo: copiar solo
+   * una línea dejaría el nombre sin saber de dónde sale.
+   */
+  sliceImportRule: `Import statements: only the \`import\` and \`from ... import\` lines required by names used inside the code you keep (decorators and type hints included). If a name comes from a module-level \`try\` or \`if\` block, copy that whole block`,
+
+  /**
+   * Ejemplo del recorte esperado, con lo que más aparece junto a una función.
+   * Sin comillas adentro, porque va dentro de un arreglo de textos JSON.
+   */
+  sliceExample: `"from decimal import Decimal",
+"",
+"TAX_RATE = Decimal(13)",
+"",
+"def _rounded(value):",
+"    return round(value, 2)",
+"",
+"def target_function(value):",
+"    # exact function body"`,
+
   // ── Analizador ─────────────────────────────────────────────────────────────
 
   /** Sin clase no hay atributos de instancia: lo propio del módulo con `_`. */

@@ -14,7 +14,7 @@ function loadTemplate(fileName: string): string {
 }
 
 /**
- * Las ocho plantillas son neutras: exponen los puntos de extensión `{{...}}` que
+ * Las plantillas son neutras: exponen los puntos de extensión `{{...}}` que
  * rellena el perfil del adaptador (OP-08), y ninguna nombra una tecnología.
  *
  * El perfil se compone ANTES de sustituir los valores de la corrida. El orden
@@ -48,14 +48,20 @@ function replacePlaceholders(
 /**
  * Builds the method-slicer prompt (methodSlicerPrompt.txt).
  * Agent 0: extracts a minimal code slice from the full source file.
+ *
+ * Sin clase usa functionSlicerPrompt.txt: la otra pide la declaración de la
+ * clase y su constructor, y una función de módulo conserva otras cosas. Es otra
+ * plantilla, y no marcadores nuevos en la misma, para que el prompt de un método
+ * no cambie ni una letra.
  */
 export function buildMethodSlicerPrompt(
   profile: PromptProfile,
   methodName: string,
-  className: string,
+  className: string | null,
   code: string
 ): string {
-  return replacePlaceholders(compose("methodSlicerPrompt.txt", profile), {
+  const template = className === null ? "functionSlicerPrompt.txt" : "methodSlicerPrompt.txt";
+  return replacePlaceholders(compose(template, profile), {
     ...unitPlaceholders(methodName, className),
     "{code}":        code,
   });

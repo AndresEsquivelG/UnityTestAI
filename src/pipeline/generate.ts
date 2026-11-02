@@ -158,13 +158,13 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
   // qwen2.5-coder:14b, que devolvió un JSON roto (2026-10-26). Es una falla
   // blanda, como la del validador de contexto: queda a la vista y se sigue.
   //
-  // Sin clase no se recorta: la plantilla pide la declaración de la clase y
-  // el constructor, y una función de módulo no tiene ninguno de los dos.
-  // Enseñarle a recortar funciones queda para después.
+  // Sin clase, la respuesta además se revisa: un recorte sin la función dejaría
+  // a los agentes sin el código bajo prueba, y la ficha solo trae su firma. Con
+  // clase no se revisa, para que su corrida siga igual.
   let codeSlice = targetCode;
   let sliced = false;
   const slicerAgent = "Method Slicer";
-  if (reduceContext && className !== null) {
+  if (reduceContext) {
     notifyAgent(slicerAgent, "running");
     const slicerResult = await runMethodSlicer(
       {
@@ -184,13 +184,17 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
         "error",
         `${slicerResult.message}. Se sigue con el archivo entero, sin recortar.`,
       );
+    } else if (className === null && !slicerResult.codeSlice.join("\n").includes(methodName)) {
+      notifyAgent(
+        slicerAgent,
+        "error",
+        `El recorte no trae la función ${methodName}. Se sigue con el archivo entero, sin recortar.`,
+      );
     } else {
       notifyAgent(slicerAgent, "done");
       codeSlice = slicerResult.codeSlice.join("\n");
       sliced = true;
     }
-  } else if (reduceContext) {
-    notifyAgent(slicerAgent, "done", "Sin clase no se recorta: se usa el archivo entero.");
   }
 
   // ── Step 1: Dependency Resolver ──────────────────────────────────────────

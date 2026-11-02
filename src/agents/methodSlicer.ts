@@ -27,7 +27,8 @@ export interface MethodSlicerInput {
   /** Perfil del ecosistema con el que se compone la plantilla (OP-08). */
   profile: PromptProfile;
   code: string;
-  className: string;
+  /** `null` para una función de módulo, que usa su propia plantilla. */
+  className: string | null;
   methodName: string;
   workspaceRoot: string;
 }

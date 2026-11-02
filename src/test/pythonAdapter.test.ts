@@ -348,6 +348,8 @@ describe("adaptador de Python", () => {
         "generatorNamespaceStep",
         "generatorPreFlightItems",
         "generatorTestClassRules",
+        "sliceExample",
+        "sliceImportRule",
         "validatorComputedProperties",
         "validatorImports",
       ]);

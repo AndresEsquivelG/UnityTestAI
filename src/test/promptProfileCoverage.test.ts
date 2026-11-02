@@ -21,9 +21,10 @@ import type { ProjectModel, PromptProfile } from "../core/contracts";
  * justamente al agregar un marcador nuevo y olvidarse del perfil.
  */
 describe("cobertura del perfil sobre las plantillas neutras", () => {
-  /** Las ocho plantillas, ya todas repartidas. */
+  /** Las nueve plantillas, ya todas repartidas. */
   const SPLIT_TEMPLATES = [
     "methodSlicerPrompt.txt",
+    "functionSlicerPrompt.txt",
     "dependencyResolverPrompt.txt",
     "contextBuilderPrompt.txt",
     "contextValidatorPrompt.txt",
