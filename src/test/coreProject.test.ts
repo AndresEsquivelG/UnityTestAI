@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import * as fsp from "fs/promises";
+import * as os from "os";
+import * as path from "path";
 import {
+  applyPreconditionFix,
   artifactRelativePath,
   describeViolations,
   renderProjectTree,
   resolveDependencies,
+  UnmetPreconditions,
 } from "../core/project";
 import type {
   ArtifactSpec,
@@ -210,5 +215,58 @@ describe("lectura de las dependencias resueltas", () => {
     const result = await resolveDependencies(adapter, model([]), []);
 
     assert.deepEqual(result, { code: "", files: [] });
+  });
+});
+
+describe("arreglo de un incumplimiento", () => {
+  const FIX = { label: "Crear", relativePath: "uno/dos/archivo.txt", content: "propuesto" };
+
+  const withRoot = async (check: (root: string) => Promise<void>) => {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), "utia-arreglo-"));
+    try {
+      await check(root);
+    } finally {
+      await fsp.rm(root, { recursive: true, force: true });
+    }
+  };
+
+  it("crea el archivo con su carpeta y devuelve la ruta", () =>
+    withRoot(async (root) => {
+      const written = await applyPreconditionFix(root, FIX);
+
+      assert.equal(written, path.join(root, "uno", "dos", "archivo.txt"));
+      assert.equal(await fsp.readFile(written, "utf8"), "propuesto");
+    }));
+
+  it("no sobrescribe lo que ya está", () =>
+    withRoot(async (root) => {
+      const written = await applyPreconditionFix(root, FIX);
+      await fsp.writeFile(written, "de la persona", "utf8");
+
+      await assert.rejects(applyPreconditionFix(root, FIX), /ya existe/);
+      assert.equal(await fsp.readFile(written, "utf8"), "de la persona");
+    }));
+
+  it("no escribe fuera del proyecto", () =>
+    withRoot(async (root) => {
+      for (const relativePath of ["../fuera.txt", "uno/../../fuera.txt", ""]) {
+        await assert.rejects(
+          applyPreconditionFix(root, { ...FIX, relativePath }),
+          /fuera del proyecto/
+        );
+      }
+    }));
+
+  it("el error de la generación conserva el texto de siempre y los incumplimientos", () => {
+    const violations = [
+      { code: "uno", message: "Falta algo.", remediation: "Agregalo.", fix: FIX },
+    ];
+
+    const unmet = new UnmetPreconditions("/proyecto", violations);
+
+    assert.ok(unmet instanceof Error);
+    assert.equal(unmet.message, describeViolations(violations));
+    assert.equal(unmet.rootPath, "/proyecto");
+    assert.equal(unmet.violations[0].fix, FIX);
   });
 });

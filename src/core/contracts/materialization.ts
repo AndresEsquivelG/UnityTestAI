@@ -63,4 +63,21 @@ export interface PreconditionViolation {
   readonly message: string;
   /** Instrucción concreta para subsanarlo. */
   readonly remediation: string;
+  /** Archivo que la herramienta puede crear para subsanarlo, si la persona lo pide. */
+  readonly fix?: PreconditionFix;
+}
+
+/**
+ * Arreglo de un incumplimiento: crear un archivo.
+ *
+ * Es un dato y no una función para que el adaptador lo decida sin tocar el disco
+ * y el núcleo lo aplique sin saber qué archivo es. Comprobar las precondiciones
+ * sigue sin tener efectos: nada se escribe hasta que la persona lo pide.
+ */
+export interface PreconditionFix {
+  /** Texto del botón que lo ofrece. */
+  readonly label: string;
+  /** Archivo a crear, relativo a `ProjectModel.rootPath`, con separador "/". */
+  readonly relativePath: string;
+  readonly content: string;
 }

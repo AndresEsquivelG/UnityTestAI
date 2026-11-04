@@ -3,6 +3,8 @@ import {
   type ArtifactSpec,
   type Diagnostic,
   type EcosystemAdapter,
+  type PreconditionFix,
+  type PreconditionViolation,
   type ProjectModel,
   type VerificationKind,
   type VerificationResult,
@@ -88,6 +90,43 @@ export interface PresentedTestCase {
   readonly name: string;
   /** Por qué falló o se omitió, en una línea. */
   readonly detail?: string;
+}
+
+/** Los incumplimientos de OP-12 no son una etapa de verificación, pero se muestran igual. */
+const PRECONDITIONS_STAGE_NAME = "Antes de generar";
+
+/**
+ * Lo que impide empezar a generar. Con uno solo se muestra como cualquier otro
+ * aviso; con varios, cada uno en su renglón con su instrucción.
+ */
+export function presentUnmetPreconditions(
+  violations: readonly PreconditionViolation[]
+): VerificationPresentation {
+  const base = {
+    stageName: PRECONDITIONS_STAGE_NAME,
+    status: "notRun" as const,
+    retryable: false,
+    diagnostics: [],
+  };
+  if (violations.length === 1) {
+    return { ...base, summary: violations[0].message, remediation: violations[0].remediation };
+  }
+  return {
+    ...base,
+    summary: `Hay ${violations.length} cosas por resolver.`,
+    details: violations.map((violation) => `${violation.message} → ${violation.remediation}`),
+  };
+}
+
+/** El arreglo de un incumplimiento quedó aplicado. */
+export function presentPreconditionFixed(fix: PreconditionFix): VerificationPresentation {
+  return {
+    stageName: PRECONDITIONS_STAGE_NAME,
+    status: "passed",
+    summary: `Se creó "${fix.relativePath}". Ya se puede generar la prueba.`,
+    retryable: false,
+    diagnostics: [],
+  };
 }
 
 /**

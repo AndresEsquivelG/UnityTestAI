@@ -13,8 +13,13 @@ import {
 import { artifactModelId, CLAUDE_MODELS, OPENAI_MODELS, type ModelChoice } from "../llm/models";
 import { DEFAULT_OLLAMA_MODEL, listOllamaModels } from "../llm/ollamaModels";
 import type { ActiveEcosystem } from "../core/adapters";
-import { readArtifact } from "../core/project";
-import type { VerificationOutcome } from "../core/verification";
+import type { PreconditionFix } from "../core/contracts";
+import { applyPreconditionFix, readArtifact, UnmetPreconditions } from "../core/project";
+import {
+  presentPreconditionFixed,
+  presentUnmetPreconditions,
+  type VerificationOutcome,
+} from "../core/verification";
 import {
   checkExistingTest,
   checkGeneratedTest,
@@ -79,6 +84,22 @@ const verificationStatusByPanel = new WeakMap<
   vscode.WebviewPanel,
   VerificationOutcome["status"]
 >();
+
+/**
+ * El arreglo que ofrece el último aviso de precondiciones de cada panel. Queda
+ * de este lado: el botón solo pide aplicarlo, así que el panel no decide qué
+ * archivo se escribe ni con qué contenido.
+ */
+const pendingFixByPanel = new WeakMap<
+  vscode.WebviewPanel,
+  { rootPath: string; fix: PreconditionFix }
+>();
+
+/**
+ * Repite la última generación con lo mismo que se pidió. Hace falta porque pudo
+ * pedirse desde una configuración JSON, y entonces el formulario está vacío.
+ */
+const repeatGenerationByPanel = new WeakMap<vscode.WebviewPanel, () => Promise<void>>();
 
 const tokenTotalsByPanel = new WeakMap<
   vscode.WebviewPanel,
@@ -452,6 +473,10 @@ async function handleGenerate(
     return;
   }
 
+  repeatGenerationByPanel.set(panel, () =>
+    handleGenerate(className, methodName, model, subModel, editor, reduceContext, panel, ecosystem),
+  );
+
   const chosen = chosenModel(model, subModel);
   generationMetaByPanel.set(panel, { className, methodName, model, subModel: chosen });
 
@@ -496,8 +521,58 @@ async function handleGenerate(
     // queda registrado aparte, en el volcado `repair`.
     await verifyInPanel(panel, ecosystem);
   } catch (err: any) {
+    if (err instanceof UnmetPreconditions) {
+      showUnmetPreconditions(panel, err);
+      return;
+    }
     panel.webview.postMessage({ command: "agentError", message: err.message });
     vscode.window.showErrorMessage("Error al generar: " + err.message);
+  }
+}
+
+/**
+ * Se muestra en el panel y no en una notificación: el aviso puede traer un botón,
+ * y `agentError` no serviría porque todavía no corre ningún agente al que marcar.
+ */
+function showUnmetPreconditions(panel: vscode.WebviewPanel, unmet: UnmetPreconditions) {
+  const fix = unmet.violations.find((violation) => violation.fix)?.fix;
+  if (fix) {
+    pendingFixByPanel.set(panel, { rootPath: unmet.rootPath, fix });
+  } else {
+    pendingFixByPanel.delete(panel);
+  }
+  panel.webview.postMessage({
+    command: "showPreconditions",
+    verification: presentUnmetPreconditions(unmet.violations),
+    fixLabel: fix?.label,
+  });
+}
+
+/** Aplica el arreglo que ofreció el último aviso. No genera sola: eso gasta tokens. */
+async function applyPendingFix(panel: vscode.WebviewPanel) {
+  const pending = pendingFixByPanel.get(panel);
+  if (!pending) {
+    return;
+  }
+  pendingFixByPanel.delete(panel);
+
+  try {
+    await applyPreconditionFix(pending.rootPath, pending.fix);
+    panel.webview.postMessage({
+      command: "preconditionFixed",
+      verification: presentPreconditionFixed(pending.fix),
+    });
+  } catch (err: any) {
+    panel.webview.postMessage({
+      command: "showPreconditions",
+      verification: presentUnmetPreconditions([
+        {
+          code: "core.precondition-fix-failed",
+          message: `No se pudo crear el archivo: ${err.message}`,
+          remediation: "Revisá la carpeta y volvé a generar.",
+        },
+      ]),
+    });
   }
 }
 
@@ -745,6 +820,14 @@ export async function createWebviewPanel(
         );
         break;
       }
+
+      case "applyPreconditionFix":
+        await applyPendingFix(panel);
+        break;
+
+      case "generateAgain":
+        await repeatGenerationByPanel.get(panel)?.();
+        break;
 
       case "verifyAgain":
         await verifyInPanel(panel, ecosystem);

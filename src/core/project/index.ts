@@ -8,10 +8,12 @@
 export { renderProjectTree } from "./projectTree";
 
 export {
+  applyPreconditionFix,
   artifactAbsolutePath,
   artifactRelativePath,
   describeViolations,
   readArtifact,
+  UnmetPreconditions,
   writeArtifact,
 } from "./artifact";
 

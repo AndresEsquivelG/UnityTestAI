@@ -26,7 +26,8 @@ import { buildUnityProjectModel } from "./projectModel";
 import { locateUnitSymbol, readUnitSource, resolveUnityDependency } from "./symbols";
 import { unityPromptProfile } from "./promptProfile";
 import { unityAnalysisSchema } from "./analysisSchema";
-import { checkUnityPreconditions, normalizeUnityCode, specifyUnityArtifact } from "./artifact";
+import { normalizeUnityCode, specifyUnityArtifact } from "./artifact";
+import { checkUnityPreconditions } from "./testAssembly";
 import { compileUnityProject } from "./compilation";
 import { runUnityTests } from "./testRun";
 import { collectUnityCoverage } from "./coverage";
@@ -134,9 +135,10 @@ export class UnityAdapter implements EcosystemAdapter {
 
   checkPreconditions(
     project: ProjectModel,
-    spec: ArtifactSpec
+    spec: ArtifactSpec,
+    location?: SymbolCandidate
   ): Promise<readonly PreconditionViolation[]> {
-    return checkUnityPreconditions(project, spec);
+    return checkUnityPreconditions(project, spec, location);
   }
 
   verifyArtifact(project: ProjectModel, spec: ArtifactSpec): Promise<VerificationResult> {

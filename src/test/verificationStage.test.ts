@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ArtifactSpec, ProjectModel, VerificationResult } from "../core/contracts";
 import {
+  presentPreconditionFixed,
+  presentUnmetPreconditions,
   presentVerification,
   runVerificationStage,
   verificationStageName,
@@ -152,6 +154,43 @@ describe("etapa de verificación", () => {
 
       assert.equal(withOne.summary, "La prueba pasó la verificación con 1 aviso.");
       assert.equal(withNone.summary, "La prueba pasó la verificación.");
+    });
+  });
+
+  describe("precondiciones sin cumplir", () => {
+    const ONE = { code: "uno", message: "Falta algo.", remediation: "Agregalo." };
+    const TWO = { code: "dos", message: "Falta otra cosa.", remediation: "Instalala." };
+
+    it("una sola se muestra como cualquier otro aviso, sin reintento", () => {
+      const presented = presentUnmetPreconditions([ONE]);
+
+      assert.equal(presented.status, "notRun");
+      assert.equal(presented.summary, "Falta algo.");
+      assert.equal(presented.remediation, "Agregalo.");
+      assert.equal(presented.retryable, false);
+    });
+
+    it("varias van cada una en su renglón, con su instrucción", () => {
+      const presented = presentUnmetPreconditions([ONE, TWO]);
+
+      assert.equal(presented.summary, "Hay 2 cosas por resolver.");
+      assert.deepEqual(presented.details, [
+        "Falta algo. → Agregalo.",
+        "Falta otra cosa. → Instalala.",
+      ]);
+      assert.equal(presented.remediation, undefined);
+    });
+
+    it("el arreglo aplicado dice qué archivo se creó", () => {
+      const presented = presentPreconditionFixed({
+        label: "Crear",
+        relativePath: "pruebas/config.txt",
+        content: "",
+      });
+
+      assert.equal(presented.status, "passed");
+      assert.match(presented.summary, /pruebas\/config\.txt/);
+      assert.equal(presented.retryable, false);
     });
   });
 });

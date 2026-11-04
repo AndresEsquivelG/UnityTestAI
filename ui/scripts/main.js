@@ -452,6 +452,34 @@ window.addEventListener("message", (event) => {
       );
       break;
 
+    // Lo que impide empezar a generar, antes del primer agente.
+    case "showPreconditions":
+      hideLoadingUI();
+      showVerification(
+        message.verification,
+        () => {},
+        "verificationPanel",
+        message.fixLabel
+          ? {
+              label: message.fixLabel,
+              once: true,
+              run: () => vscode.postMessage({ command: "applyPreconditionFix" }),
+            }
+          : undefined
+      );
+      break;
+
+    case "preconditionFixed":
+      showVerification(message.verification, () => {}, "verificationPanel", {
+        label: "Generar la prueba",
+        once: true,
+        run: () => {
+          showLoadingUI();
+          vscode.postMessage({ command: "generateAgain" });
+        },
+      });
+      break;
+
     case "showDependencyResult":
       hideLoadingUI();
       renderResult(message.result, resultContainer, copyBtn, true);

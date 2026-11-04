@@ -24,7 +24,7 @@ const SOURCE_EXTENSION = ".cs";
  * `obj` y `Logs` en cada compilación, y sus contenidos no son fuentes del
  * proyecto.
  */
-const EXCLUDED_DIRECTORIES = new Set([
+export const EXCLUDED_DIRECTORIES: ReadonlySet<string> = new Set([
   "Library",
   "Temp",
   "Logs",

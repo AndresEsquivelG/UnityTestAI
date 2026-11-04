@@ -200,7 +200,8 @@ export function showVerificationRunning(stageName, panelId = "verificationPanel"
  *           diagnostics: { severity: string, location: string, code?: string, message: string }[] }} verification
  * @param {() => void} onRetry
  * @param {string} [panelId]
- * @param {{ label: string, run: () => void }} [action] Botón propio de la etapa.
+ * @param {{ label: string, run: () => void, once?: boolean }} [action] Botón propio de la etapa.
+ *   Con `once` se desactiva al tocarlo: lo que hace no se puede pedir dos veces.
  */
 export function showVerification(verification, onRetry, panelId = "verificationPanel", action) {
   const panel = document.getElementById(panelId);
@@ -290,7 +291,10 @@ export function showVerification(verification, onRetry, panelId = "verificationP
     const button = document.createElement("button");
     button.className = "verification__retry";
     button.textContent = action.label;
-    button.addEventListener("click", action.run);
+    button.addEventListener("click", () => {
+      if (action.once) button.disabled = true;
+      action.run();
+    });
     panel.appendChild(button);
   }
 }

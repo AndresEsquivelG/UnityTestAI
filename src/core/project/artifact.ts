@@ -1,6 +1,11 @@
 import * as fsp from "fs/promises";
 import * as path from "path";
-import type { ArtifactSpec, PreconditionViolation, ProjectModel } from "../contracts";
+import type {
+  ArtifactSpec,
+  PreconditionFix,
+  PreconditionViolation,
+  ProjectModel,
+} from "../contracts";
 
 /**
  * Escritura del artefacto especificado por OP-10.
@@ -61,4 +66,49 @@ export function describeViolations(
   return violations
     .map((violation) => `${violation.message}\n  → ${violation.remediation}`)
     .join("\n");
+}
+
+/**
+ * La generación no empezó porque OP-12 encontró incumplimientos. Se lanza con
+ * los incumplimientos completos, y no solo con su texto, para que el panel pueda
+ * ofrecer el arreglo que traiga alguno.
+ */
+export class UnmetPreconditions extends Error {
+  constructor(
+    readonly rootPath: string,
+    readonly violations: readonly PreconditionViolation[]
+  ) {
+    super(describeViolations(violations));
+    this.name = "UnmetPreconditions";
+  }
+}
+
+/**
+ * Crea el archivo de un arreglo, con su carpeta si falta, y devuelve su ruta
+ * absoluta. A diferencia de `writeArtifact`, aquí crear la carpeta es parte de lo
+ * que la persona pidió.
+ *
+ * Nunca sobrescribe: entre el aviso y el clic alguien pudo haber creado el
+ * archivo, y lo suyo vale más que lo que propuso la herramienta.
+ */
+export async function applyPreconditionFix(
+  rootPath: string,
+  fix: PreconditionFix
+): Promise<string> {
+  const target = path.resolve(rootPath, ...fix.relativePath.split("/"));
+  const inside = path.relative(rootPath, target);
+  if (inside === "" || inside.startsWith("..") || path.isAbsolute(inside)) {
+    throw new Error(`"${fix.relativePath}" queda fuera del proyecto.`);
+  }
+
+  await fsp.mkdir(path.dirname(target), { recursive: true });
+  try {
+    await fsp.writeFile(target, fix.content, { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error(`"${fix.relativePath}" ya existe y no se sobrescribe.`);
+    }
+    throw error;
+  }
+  return target;
 }

@@ -1,25 +1,18 @@
-import * as fsp from "fs/promises";
 import * as path from "path";
-import type {
-  ArtifactRequest,
-  ArtifactSpec,
-  PreconditionViolation,
-  ProjectModel,
-} from "../../core/contracts";
+import type { ArtifactRequest, ArtifactSpec } from "../../core/contracts";
 import { baseArtifactName } from "../shared/artifactName";
 
 /**
- * Operaciones de materialización del adaptador Unity — OP-10, OP-11 y OP-12.
+ * Operaciones de materialización del adaptador Unity — OP-10 y OP-11. OP-12, que
+ * es sobre todo el ensamblado de pruebas, está en `testAssembly.ts`.
  *
- * Reúnen lo que hoy está repartido entre `testGenerator` —carpeta "Tests",
+ * Reúnen lo que hoy está repartido entre `testGenerator`: carpeta "Tests",
  * nombre `UTIA_<modelo>_<clase>_<método>`, extensión ".cs" y el renombrado de
- * la clase generada— y `testSaver`, que comprueba el archivo de definición de
- * ensamblado pero nunca llega a ejecutarse.
+ * la clase generada.
  */
 
 const FALLBACK_TEST_DIRECTORY = "Assets/Tests";
 const EXTENSION = ".cs";
-const ASSEMBLY_DEFINITION = ".asmdef";
 
 /**
  * OP-10 — Especificación del artefacto.
@@ -74,47 +67,4 @@ export function normalizeUnityCode(code: string, spec: ArtifactSpec): string {
     /(?:public\s+|internal\s+)?(?:sealed\s+|partial\s+|static\s+|abstract\s+)*class\s+\w+/,
     `public class ${spec.unitName}`
   );
-}
-
-/**
- * OP-12 — Precondiciones del ecosistema antes de escribir el artefacto.
- *
- * Las dos son de Unity: sin carpeta de pruebas no hay dónde escribir, y sin
- * archivo de definición de ensamblado el editor no reconoce las pruebas ni
- * llega a compilarlas, de modo que el artefacto se escribiría para nada.
- */
-export async function checkUnityPreconditions(
-  project: ProjectModel,
-  spec: ArtifactSpec
-): Promise<readonly PreconditionViolation[]> {
-  const violations: PreconditionViolation[] = [];
-  const directory = path.join(project.rootPath, ...spec.directory.split("/"));
-
-  let entries: string[];
-  try {
-    entries = await fsp.readdir(directory);
-  } catch {
-    return [
-      {
-        code: "unity.test-directory-missing",
-        message: `La carpeta de pruebas "${spec.directory}" no existe en el proyecto.`,
-        remediation:
-          `Creá la carpeta "${spec.directory}" dentro del proyecto y agregale un archivo ` +
-          `de definición de ensamblado de pruebas (${ASSEMBLY_DEFINITION}).`,
-      },
-    ];
-  }
-
-  if (!entries.some((entry) => entry.toLowerCase().endsWith(ASSEMBLY_DEFINITION))) {
-    violations.push({
-      code: "unity.assembly-definition-missing",
-      message: `La carpeta "${spec.directory}" no tiene un archivo ${ASSEMBLY_DEFINITION}, así que Unity no reconocerá las pruebas.`,
-      remediation:
-        `En el editor, seleccioná la carpeta "${spec.directory}" y creá un Assembly Definition ` +
-        `(Create > Testing > Tests Assembly Folder), que agrega las referencias a ` +
-        `UnityEngine.TestRunner y NUnit.`,
-    });
-  }
-
-  return violations;
 }

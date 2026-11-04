@@ -75,6 +75,7 @@ export type {
 export type {
   ArtifactRequest,
   ArtifactSpec,
+  PreconditionFix,
   PreconditionViolation,
 } from "./materialization";
 

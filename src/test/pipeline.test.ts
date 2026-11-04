@@ -8,6 +8,8 @@ import {
   type Ask,
   type PipelineEvent,
 } from "../pipeline";
+import type { EcosystemAdapter } from "../core/contracts";
+import { UnmetPreconditions } from "../core/project";
 import { FictitiousAdapter } from "./support/fictitiousAdapter";
 import { createFictitiousFixture, type FictitiousFixture } from "./support/fictitiousFixture";
 
@@ -339,6 +341,51 @@ describe("pipeline entero sobre el adaptador ficticio", () => {
     assert.deepEqual(model.calls, ["Method Slicer", "Dependency Resolver"]);
     assert.equal(agentSteps(events).at(-1), "Dependency Resolver: error");
     assert.equal(fs.existsSync(path.join(fixture.projectRoot, "pruebas", "prueba_calculadora_sumar.fic")), false);
+  });
+
+  it("con una precondición rota, falla con los incumplimientos antes de la primera llamada al modelo", async () => {
+    fs.rmSync(path.join(fixture.projectRoot, "pruebas"), { recursive: true });
+    const model = scriptedModel();
+
+    const request = generateTest({
+      adapter: new FictitiousAdapter(),
+      rootPath: fixture.projectRoot,
+      className: "Calculadora",
+      methodName: "sumar",
+      modelId: "libreto",
+      reduceContext: true,
+      ask: model.ask,
+    });
+
+    await assert.rejects(request, (error: unknown) => {
+      assert.ok(error instanceof UnmetPreconditions);
+      assert.equal(error.rootPath, fixture.projectRoot);
+      assert.equal(error.violations[0].code, "ficticio.test-directory-missing");
+      return true;
+    });
+    assert.deepEqual(model.calls, []);
+  });
+
+  it("le pasa a las precondiciones dónde está la unidad bajo prueba", async () => {
+    const adapter: EcosystemAdapter = new FictitiousAdapter();
+    const original = adapter.checkPreconditions.bind(adapter);
+    let seen: string | undefined;
+    adapter.checkPreconditions = (project, spec, location) => {
+      seen = location?.filePath;
+      return original(project, spec);
+    };
+
+    await generateTest({
+      adapter,
+      rootPath: fixture.projectRoot,
+      className: "Calculadora",
+      methodName: "sumar",
+      modelId: "libreto",
+      reduceContext: true,
+      ask: scriptedModel().ask,
+    });
+
+    assert.match(seen ?? "", /calculadora/i);
   });
 
   it("si la unidad no existe, falla antes de la primera llamada al modelo", async () => {

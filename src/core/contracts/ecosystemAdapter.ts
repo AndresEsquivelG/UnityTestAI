@@ -187,11 +187,14 @@ export interface EcosystemAdapter {
 
   /**
    * OP-12 — Verificación de precondiciones antes de escribir el artefacto.
-   * Devuelve la lista vacía cuando todas se satisfacen.
+   * Devuelve la lista vacía cuando todas se satisfacen. `location` es la
+   * declaración de la unidad bajo prueba, para el ecosistema en el que la prueba
+   * solo compila si puede alcanzar el lugar donde está esa unidad.
    */
   checkPreconditions(
     project: ProjectModel,
-    spec: ArtifactSpec
+    spec: ArtifactSpec,
+    location?: SymbolCandidate
   ): Promise<readonly PreconditionViolation[]>;
 
   // ── Verificación (firmas provisionales: ver verification.ts) ─────────────

@@ -6,6 +6,8 @@
  */
 
 export {
+  presentPreconditionFixed,
+  presentUnmetPreconditions,
   presentVerification,
   runVerificationStage,
   verificationStageName,

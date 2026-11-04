@@ -14,9 +14,9 @@ import type {
 } from "../core/contracts";
 import {
   dependencyLabel,
-  describeViolations,
   renderProjectTree,
   resolveDependencies,
+  UnmetPreconditions,
   writeArtifact,
   type ResolvedDependency,
 } from "../core/project";
@@ -120,9 +120,9 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
     targetLocation,
     modelId: request.modelId,
   });
-  const violations = await adapter.checkPreconditions(project, spec);
+  const violations = await adapter.checkPreconditions(project, spec, targetLocation);
   if (violations.length > 0) {
-    throw new Error(describeViolations(violations));
+    throw new UnmetPreconditions(project.rootPath, violations);
   }
 
   // ── OP-06: código de la unidad ───────────────────────────────────────────
