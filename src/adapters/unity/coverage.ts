@@ -123,7 +123,9 @@ export function coverageArguments(
 
 /**
  * Informe de la ejecución dentro de la carpeta de resultados. El paquete lo
- * deja en `<proyecto>-opencov/<plataforma>/TestCoverageResults_0000.xml`.
+ * deja en `<proyecto>-opencov/<plataforma>/TestCoverageResults_<número>.xml`.
+ * Se toma el último: en algunos proyectos (Unity 2020.3 con el paquete 1.2.7)
+ * el `_0000` es un mapa en cero y lo ejecutado queda en el `_0001`.
  *
  * Devuelve la cadena vacía si la corrida no ejecutó nada del archivo (el
  * paquete no escribe informe y lo dice en el log), y `undefined` si no hay
@@ -133,11 +135,12 @@ export async function readExecutionCoverage(
   resultsDir: string,
   log: string
 ): Promise<string | undefined> {
-  for (const file of await listFiles(resultsDir)) {
+  const reports = (await listFiles(resultsDir)).filter((file) => {
     const name = path.basename(file);
-    if (name.endsWith(".xml") && name !== FULL_MAP_FILE) {
-      return readIfPresent(file);
-    }
+    return name.endsWith(".xml") && name !== FULL_MAP_FILE;
+  });
+  if (reports.length > 0) {
+    return readIfPresent(reports[reports.length - 1]);
   }
   return log.includes(NOTHING_VISITED_MESSAGE) ? "" : undefined;
 }

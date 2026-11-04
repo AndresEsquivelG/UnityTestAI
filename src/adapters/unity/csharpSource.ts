@@ -143,6 +143,29 @@ export function findTypeBodies(masked: string, typeName: string): SourceRange[] 
 }
 
 /**
+ * Espacio de nombres que envuelve una posición, ya enmascarado el código, con
+ * los anidados unidos: dentro de `namespace A { namespace B.C { ... } }` da
+ * `A.B.C`. La cadena vacía significa que no hay ninguno.
+ *
+ * `line` y `column` son base 1, como en `MethodDeclaration`.
+ */
+export function findEnclosingNamespace(masked: string, line: number, column: number): string {
+  const position = computeLineOffsets(masked)[line - 1] + column - 1;
+  const declaration = /\bnamespace\s+([^\s{;]+)\s*\{/g;
+
+  const names: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = declaration.exec(masked)) !== null) {
+    const open = match.index + match[0].length - 1;
+    const close = findClosing(masked, open, "{", "}");
+    if (open < position && position < close) {
+      names.push(match[1]);
+    }
+  }
+  return names.join(".");
+}
+
+/**
  * Declaraciones de un método dentro de un rango.
  *
  * `maxDepth` es la profundidad de llaves, relativa al rango, a la que se acepta

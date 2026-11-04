@@ -31,6 +31,7 @@ import { compileUnityProject } from "./compilation";
 import { runUnityTests } from "./testRun";
 import { collectUnityCoverage } from "./coverage";
 import { detectUnityDependencies } from "./dependencies";
+import { describeUnityUnit } from "./classFacts";
 import { systemEditorToolchain, type UnityEditorToolchain } from "./editor";
 
 export interface UnityAdapterOptions {
@@ -45,10 +46,11 @@ export interface UnityAdapterOptions {
  * Adaptador del ecosistema Unity / C#.
  *
  * Primera implementación de la interfaz de adaptación. Cubre las once
- * operaciones obligatorias y cinco de las siete opcionales: OP-09; OP-13,
+ * operaciones obligatorias y seis de las siete opcionales: OP-09; OP-13,
  * OP-14 y OP-15, que compilan el proyecto, ejecutan la prueba y miden su
- * cobertura con el editor de Unity en modo batch, y OP-17, que detecta los
- * tipos del proyecto que usa la unidad.
+ * cobertura con el editor de Unity en modo batch; OP-17, que detecta los
+ * tipos del proyecto que usa la unidad, y OP-18, que dice en qué espacio de
+ * nombres está la clase.
  *
  * El ciclo de vida se declara en falso porque hoy es cierto: no hay
  * artefactos temporales que preparar ni limpiar. Cuando los haya, esta
@@ -78,7 +80,7 @@ export class UnityAdapter implements EcosystemAdapter {
     analysisSchemaExtension: true,
     lifecycle: false,
     dependencyDetection: true,
-    unitFacts: false,
+    unitFacts: true,
     moduleLevelUnits: false,
   };
 
@@ -108,6 +110,10 @@ export class UnityAdapter implements EcosystemAdapter {
     focus?: UnitTarget
   ): Promise<readonly string[]> {
     return detectUnityDependencies(project, code, focus);
+  }
+
+  describeUnit(code: string, target: UnitTarget, location: SymbolCandidate): string {
+    return describeUnityUnit(code, target, location);
   }
 
   getPromptProfile(project: ProjectModel): PromptProfile {

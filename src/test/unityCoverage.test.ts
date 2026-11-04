@@ -432,6 +432,47 @@ describe("cobertura con el paquete de Unity (OP-15)", () => {
       }
     });
 
+    describe("con el mapa y la ejecución en la misma carpeta (Unity 2020.3, paquete 1.2.7)", () => {
+      const withReports = async (
+        reports: Record<string, string>,
+        check: (resultsDir: string) => Promise<void>
+      ) => {
+        const resultsDir = await fsp.mkdtemp(path.join(os.tmpdir(), "utia-cobertura-"));
+        try {
+          const platformDir = path.join(resultsDir, "Juego-opencov", "PlayMode");
+          await fsp.mkdir(platformDir, { recursive: true });
+          for (const [name, content] of Object.entries(reports)) {
+            await fsp.writeFile(path.join(platformDir, name), content, "utf8");
+          }
+          await check(resultsDir);
+        } finally {
+          await fsp.rm(resultsDir, { recursive: true, force: true });
+        }
+      };
+
+      it("lee lo ejecutado, no el mapa en cero", async () => {
+        await withReports(
+          { "TestCoverageResults_0000.xml": MAP, "TestCoverageResults_0001.xml": EXECUTED },
+          async (resultsDir) => {
+            // El mapa de la raíz queda último por nombre y no es de la ejecución.
+            await fsp.writeFile(path.join(resultsDir, "TestCoverageResults_fullEmpty.xml"), MAP, "utf8");
+            assert.equal(await readExecutionCoverage(resultsDir, ""), EXECUTED);
+          }
+        );
+      });
+
+      it("si la prueba no llegó al archivo solo queda el mapa, y da cero cubierto", async () => {
+        await withReports({ "TestCoverageResults_0000.xml": MAP }, async (resultsDir) => {
+          const raw = await readExecutionCoverage(resultsDir, "");
+          assert.equal(raw, MAP);
+
+          const report = mergeCoverage(parseOpenCover(MAP)!, parseOpenCover(raw!)!, TARGET);
+          assert.equal(report.target?.line.covered, 0);
+          assert.ok((report.target?.line.total ?? 0) > 0);
+        });
+      });
+    });
+
     it("una ruta con separadores o comodines del paquete no se puede filtrar", () => {
       assert.equal(pathFilterFor("Assets/Scripts/Utilities.cs"), "+**/Assets/Scripts/Utilities.cs");
       assert.equal(pathFilterFor("Assets\\Scripts\\Utilities.cs"), "+**/Assets/Scripts/Utilities.cs");

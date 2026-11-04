@@ -415,12 +415,12 @@ public static class Utilities
         analysisSchemaExtension: true,
         lifecycle: false,
         dependencyDetection: true,
-        unitFacts: false,
+        unitFacts: true,
         moduleLevelUnits: false,
       });
     });
 
-    it("implementa OP-09, OP-13, OP-14, OP-15 y OP-17 tal como las declara", () => {
+    it("implementa OP-09, OP-13, OP-14, OP-15, OP-17 y OP-18 tal como las declara", () => {
       // El registro rechazaría al adaptador si declarara sin implementar, pero
       // conviene que el fallo se lea aquí y no en un mensaje de alta.
       assert.equal(typeof adapter.extendAnalysisSchema, "function");
@@ -428,6 +428,7 @@ public static class Utilities
       assert.equal(typeof adapter.runTests, "function");
       assert.equal(typeof adapter.collectCoverage, "function");
       assert.equal(typeof adapter.detectDependencies, "function");
+      assert.equal(typeof adapter.describeUnit, "function");
     });
   });
 });
