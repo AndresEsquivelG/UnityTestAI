@@ -402,15 +402,24 @@ describe("texto para el corrector", () => {
     assert.match(feedback, /\n\nTests\/Prueba\.x:99: error: fuera de rango\n\nFix/);
   });
 
-  it("corta la lista en veinte errores y dice cuántos quedaron afuera", () => {
-    const errors = Array.from({ length: 23 }, (_, index) => error(index + 1, "E1", `error ${index + 1}`));
+  it("corta la lista en cuarenta errores y dice cuántos quedaron afuera", () => {
+    const errors = Array.from({ length: 43 }, (_, index) => error(index + 1, "E1", `error ${index + 1}`));
 
     const feedback = describeForFixer("compile", errors, "");
 
-    assert.match(feedback, /with 23 errors\./);
-    assert.match(feedback, /error 20\n/);
-    assert.doesNotMatch(feedback, /error 21/);
+    assert.match(feedback, /with 43 errors\./);
+    assert.match(feedback, /error 40\n/);
+    assert.doesNotMatch(feedback, /error 41/);
     assert.match(feedback, /\n\n\(3 more errors not shown\)\n\nFix/);
+  });
+
+  it("deja ver los 28 errores de una subclase incompleta", () => {
+    const errors = Array.from({ length: 28 }, (_, index) => error(index + 1, "CS0534", `falta ${index + 1}`));
+
+    const feedback = describeForFixer("compile", errors, "");
+
+    assert.match(feedback, /falta 28\n?/);
+    assert.doesNotMatch(feedback, /not shown/);
   });
 });
 

@@ -7,7 +7,7 @@
 
 export { AdapterRegistry } from "./registry";
 export { findCapabilityMismatches } from "./capabilityConsistency";
-export { selectEcosystem } from "./selection";
+export { chooseEcosystem, selectEcosystem } from "./selection";
 
 export type {
   ActiveEcosystem,

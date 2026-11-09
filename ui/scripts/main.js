@@ -59,6 +59,7 @@ const reduceContextToggle = document.getElementById("reduceContextToggle"); // T
 const reduceContextCaption = document.getElementById("reduceContextCaption"); // Etiqueta del toggle
 const contextToggleBar = document.getElementById("contextToggleBar"); // Barra del toggle de contexto
 const ecosystemBadge = document.getElementById("ecosystemBadge"); // Ecosistema detectado
+const ecosystemSelect = document.getElementById("ecosystemSelect"); // Menú, si hay más de uno
 
 function getReduceContext() {
   return reduceContextToggle ? reduceContextToggle.checked : true;
@@ -323,12 +324,48 @@ function showEcosystem(ecosystem) {
   tooltip.push(`Adaptador ${ecosystem.version}`);
   ecosystemBadge.title = tooltip.join("\n");
 
-  ecosystemBadge.style.display = "inline-flex";
+  showEcosystemChoices(ecosystem, tooltip);
 
   // Si acepta funciones sin clase, la clase se puede dejar vacía. Solo cambia
   // la etiqueta: lo que la persona ya escribió queda.
   setClassOptional(ecosystem.moduleLevelUnits === true);
   if (getStepperState().step === 0) stepLabel.textContent = classStepLabel();
+}
+
+/**
+ * Con una sola candidata queda la insignia. Con más, un menú con la activa ya
+ * elegida; quien decide si el cambio vale es el backend, que responde con el
+ * ecosistema que quedó.
+ */
+function showEcosystemChoices(ecosystem, tooltip) {
+  const choices = ecosystem.choices ?? [];
+  const canChoose = ecosystemSelect && choices.length > 1;
+
+  ecosystemBadge.style.display = canChoose ? "none" : "inline-flex";
+  if (!ecosystemSelect) return;
+  ecosystemSelect.style.display = canChoose ? "inline-block" : "none";
+  if (!canChoose) return;
+
+  ecosystemSelect.replaceChildren(
+    ...choices.map((choice) => {
+      const option = document.createElement("option");
+      option.value = choice.id;
+      option.textContent = `${choice.displayName} (${Math.round(choice.confidence * 100)} %)`;
+      return option;
+    })
+  );
+  ecosystemSelect.value = ecosystem.id;
+  ecosystemSelect.disabled = ecosystem.locked === true;
+  ecosystemSelect.title = [
+    ...tooltip,
+    ...(ecosystem.locked ? ["Se fijó al empezar a generar. Para cambiarlo, abrí otro panel."] : []),
+  ].join("\n");
+}
+
+if (ecosystemSelect) {
+  ecosystemSelect.addEventListener("change", () => {
+    vscode.postMessage({ command: "changeEcosystem", adapterId: ecosystemSelect.value });
+  });
 }
 
 /* ============================

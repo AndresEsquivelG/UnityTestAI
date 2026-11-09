@@ -62,6 +62,20 @@ export type EcosystemSelection =
       readonly rejected: readonly RejectedEcosystem[];
     };
 
+/**
+ * El ecosistema que la persona eligió en lugar del propuesto. Solo vale uno de
+ * los que reclamaron el proyecto: una elección guardada puede nombrar a un
+ * adaptador que ya no lo reconoce, y entonces se vuelve a lo propuesto.
+ */
+export function chooseEcosystem(
+  candidates: readonly EcosystemCandidate[],
+  adapterId: string | undefined,
+  rootPath: string
+): ActiveEcosystem | undefined {
+  const chosen = candidates.find((candidate) => candidate.adapter.descriptor.id === adapterId);
+  return chosen && { adapter: chosen.adapter, applicability: chosen.applicability, rootPath };
+}
+
 export async function selectEcosystem(
   adapters: readonly EcosystemAdapter[],
   context: DetectionContext

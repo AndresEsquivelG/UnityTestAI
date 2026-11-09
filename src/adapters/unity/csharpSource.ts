@@ -291,6 +291,274 @@ export function escapeForRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Desplazamiento de una posición con línea y columna base 1. */
+export function offsetOfPosition(source: string, line: number, column: number): number {
+  return computeLineOffsets(source)[line - 1] + column - 1;
+}
+
+// ── Forma de los tipos ─────────────────────────────────────────────────────
+
+export type TypeKind = "class" | "struct" | "interface" | "enum" | "record";
+
+export interface TypeDeclaration {
+  readonly name: string;
+  readonly kind: TypeKind;
+  readonly modifiers: readonly string[];
+  /** Lo que hereda o implementa, sin genéricos ni calificación. */
+  readonly bases: readonly string[];
+  /** Comienzo de la declaración, en sus modificadores. */
+  readonly start: number;
+  readonly body: SourceRange;
+  /** Tipos que pide con `[RequireComponent]`, sin calificación. */
+  readonly requiredComponents: readonly string[];
+}
+
+export interface ConstructorDeclaration {
+  readonly signature: string;
+  readonly extent: SourceRange;
+}
+
+export interface MethodMatch {
+  readonly declaration: MethodDeclaration;
+  readonly extent: SourceRange;
+}
+
+/**
+ * Palabras que pueden seguir a `class` o `struct` sin ser un nombre, como en
+ * las restricciones `where T : class` seguidas de otra cláusula `where`.
+ */
+export const NOT_A_TYPE_NAME: ReadonlySet<string> = new Set(["where", "new", "unmanaged", "notnull"]);
+
+const TYPE_HEADER = new RegExp(
+  String.raw`(?<![\w.])((?:(?:public|private|protected|internal|static|sealed|abstract|partial|unsafe|new)\s+)*)` +
+    String.raw`(class|struct|interface|enum|record)\s+(?:(?:class|struct)\s+)?([A-Za-z_]\w*)`,
+  "g"
+);
+
+/** Todos los tipos declarados en un código ya enmascarado, también los anidados. */
+export function findTypeDeclarations(masked: string): TypeDeclaration[] {
+  const declarations: TypeDeclaration[] = [];
+  for (const match of masked.matchAll(TYPE_HEADER)) {
+    const [text, modifiers, kind, name] = match;
+    if (NOT_A_TYPE_NAME.has(name)) {
+      continue;
+    }
+    const start = match.index ?? 0;
+    const afterName = start + text.length;
+    const open = masked.indexOf("{", afterName);
+    if (open === -1) {
+      continue;
+    }
+    // Un `;` antes de la llave es un `record` sin cuerpo, no una declaración con él.
+    const header = masked.slice(afterName, open);
+    const close = header.includes(";") ? -1 : findClosing(masked, open, "{", "}");
+    if (close === -1) {
+      continue;
+    }
+    declarations.push({
+      name,
+      kind: kind as TypeKind,
+      modifiers: modifiers.trim().split(/\s+/).filter(Boolean),
+      bases: readBases(header),
+      start,
+      body: { start: open + 1, end: close },
+      requiredComponents: readRequiredComponents(masked, start),
+    });
+  }
+  return declarations;
+}
+
+function readBases(header: string): string[] {
+  const clause = header.replace(/\bwhere\b[\s\S]*$/, "");
+  const colon = clause.indexOf(":");
+  if (colon === -1) {
+    return [];
+  }
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const character of clause.slice(colon + 1)) {
+    if (character === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    depth += character === "<" || character === "(" ? 1 : character === ">" || character === ")" ? -1 : 0;
+    current += character;
+  }
+  parts.push(current);
+  return parts.map(unqualified).filter(Boolean);
+}
+
+/** `A.B<C>` da `B`; también corta los argumentos de un constructor primario. */
+function unqualified(type: string): string {
+  const name = type.replace(/[<(][\s\S]*$/, "").trim();
+  return name.slice(name.lastIndexOf(".") + 1);
+}
+
+/** Los atributos están entre el final de la sentencia anterior y la declaración. */
+function readRequiredComponents(masked: string, start: number): string[] {
+  const from =
+    Math.max(
+      masked.lastIndexOf(";", start),
+      masked.lastIndexOf("{", start),
+      masked.lastIndexOf("}", start)
+    ) + 1;
+  const attributes = masked.slice(from, start);
+
+  const required: string[] = [];
+  for (const attribute of attributes.matchAll(/RequireComponent\s*\(((?:[^()]|\([^()]*\))*)\)/g)) {
+    for (const type of attribute[1].matchAll(/typeof\s*\(\s*([\w.]+)\s*\)/g)) {
+      required.push(unqualified(type[1]));
+    }
+  }
+  return required;
+}
+
+/** Constructores de instancia de un tipo: el estático no lo llama nadie. */
+export function findConstructors(
+  masked: string,
+  original: string,
+  body: SourceRange,
+  typeName: string
+): ConstructorDeclaration[] {
+  const pattern = new RegExp(
+    String.raw`^\s*(?:\[[^\]]*\]\s*)*((?:(?:public|private|protected|internal|static|unsafe|extern)\s+)*)` +
+      `${escapeForRegExp(typeName)}` +
+      String.raw`\s*\(`
+  );
+
+  const constructors: ConstructorDeclaration[] = [];
+  for (const line of splitLines(masked, body)) {
+    if (line.depth > 0) {
+      continue;
+    }
+    const text = masked.slice(line.start, line.end);
+    const match = pattern.exec(text);
+    if (!match || /\bstatic\b/.test(match[1])) {
+      continue;
+    }
+    const parenClose = findClosing(masked, line.start + match[0].length - 1, "(", ")");
+    if (parenClose === -1) {
+      continue;
+    }
+
+    const rest = masked.slice(parenClose + 1, parenClose + 256);
+    const after = rest.trimStart();
+    if (!after.startsWith("{") && !after.startsWith(":") && !after.startsWith("=>")) {
+      continue;
+    }
+
+    // Lo que se le pasa a `base(...)` puede traer llaves: el cuerpo va después.
+    let beforeBody = parenClose;
+    if (after.startsWith(":")) {
+      const initializer = masked.indexOf("(", parenClose + 1);
+      const initializerClose = initializer === -1 ? -1 : findClosing(masked, initializer, "(", ")");
+      beforeBody = initializerClose === -1 ? parenClose : initializerClose;
+    }
+
+    const start = line.start + (text.length - text.trimStart().length);
+    constructors.push({
+      signature: original.slice(start, parenClose + 1).replace(/\s+/g, " ").trim(),
+      extent: { start, end: bodyEnd(masked, beforeBody) },
+    });
+  }
+  return constructors;
+}
+
+/** Las declaraciones `abstract` directas de un tipo, tal como están escritas. */
+export function findAbstractMembers(masked: string, body: SourceRange): string[] {
+  const members: string[] = [];
+  let depth = 0;
+  let statementStart = body.start;
+
+  const close = (end: number) => {
+    const statement = masked
+      .slice(statementStart, end)
+      .replace(/^\s*#.*$/gm, "")
+      .replace(/^(?:\s*\[[^\]]*\])+/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const head = statement.split("{")[0];
+    if (/\babstract\b/.test(head) && !/\b(?:class|struct|interface|record)\b/.test(head)) {
+      members.push(statement);
+    }
+    statementStart = end;
+  };
+
+  for (let index = body.start; index < body.end; index++) {
+    const character = masked[index];
+    if (character === "{") {
+      depth++;
+    } else if (character === "}") {
+      depth--;
+      if (depth === 0) {
+        close(index + 1);
+      }
+    } else if (character === ";" && depth === 0) {
+      close(index + 1);
+    }
+  }
+  return members;
+}
+
+const MEMBER_DECLARATION =
+  /^\s*(?:\[[^\]]*\]\s*)*(?:(?:public|private|protected|internal|static|readonly|const|volatile|virtual|override|sealed|abstract|new|unsafe)\s+)*([A-Za-z_][\w.]*(?:<[^;=(){}]*>)?(?:\[[,\s]*\])*\??)\s+([A-Za-z_]\w*)\s*(?:=|;|\{|,)/;
+
+/** El tipo declarado de cada campo y propiedad directa de un tipo. */
+export function findMemberTypes(masked: string, body: SourceRange): Map<string, string> {
+  const types = new Map<string, string>();
+  for (const line of splitLines(masked, body)) {
+    if (line.depth > 0) {
+      continue;
+    }
+    const match = MEMBER_DECLARATION.exec(masked.slice(line.start, line.end));
+    if (match) {
+      types.set(match[2], match[1]);
+    }
+  }
+  return types;
+}
+
+/** Cada declaración de un método, con su firma y su extensión. */
+export function findMethods(
+  masked: string,
+  original: string,
+  range: SourceRange,
+  methodName: string
+): MethodMatch[] {
+  return scanMethods(masked, original, range, methodName, 0);
+}
+
+/** Métodos estáticos que devuelven el tipo: la manera de crearlo si no hay `new`. */
+export function findStaticFactories(
+  masked: string,
+  original: string,
+  body: SourceRange,
+  typeName: string
+): string[] {
+  const pattern = new RegExp(
+    String.raw`^\s*(?:(?:public|private|protected|internal|unsafe)\s+)*static\s+(?:(?:unsafe|async)\s+)*` +
+      `${escapeForRegExp(typeName)}` +
+      String.raw`\s+[A-Za-z_]\w*\s*\(`
+  );
+
+  const factories: string[] = [];
+  for (const line of splitLines(masked, body)) {
+    const text = masked.slice(line.start, line.end);
+    const match = line.depth === 0 ? pattern.exec(text) : null;
+    if (!match) {
+      continue;
+    }
+    const parenClose = findClosing(masked, line.start + match[0].length - 1, "(", ")");
+    if (parenClose !== -1) {
+      const start = line.start + (text.length - text.trimStart().length);
+      factories.push(original.slice(start, parenClose + 1).replace(/\s+/g, " ").trim());
+    }
+  }
+  return factories;
+}
+
 // ── Interno ────────────────────────────────────────────────────────────────
 
 interface BodyLine {

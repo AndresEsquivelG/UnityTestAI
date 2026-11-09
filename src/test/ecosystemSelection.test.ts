@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { selectEcosystem } from "../core/adapters";
+import { chooseEcosystem, selectEcosystem } from "../core/adapters";
 import type { DetectionContext } from "../core/contracts";
 import { applicable, createStubAdapter } from "./support/stubAdapter";
 
@@ -80,6 +80,38 @@ describe("selección del ecosistema", () => {
       })),
       [{ id: "roto", error: "disco ilegible" }]
     );
+  });
+
+  describe("elección manual entre las candidatas", () => {
+    const propuesto = createStubAdapter({ id: "propuesto", detect: applicable(0.9) });
+    const otro = createStubAdapter({ id: "otro", detect: applicable(0.4, ["script suelto"]) });
+    const ajeno = createStubAdapter({ id: "ajeno" });
+
+    it("sustituye lo propuesto por otra candidata, con su evidencia y la misma raíz", async () => {
+      const selection = await selectEcosystem([propuesto, otro, ajeno], CONTEXT);
+      assert.ok(selection.selected);
+
+      const chosen = chooseEcosystem(selection.candidates, "otro", selection.active.rootPath);
+
+      assert.equal(chosen?.adapter.descriptor.id, "otro");
+      assert.deepEqual(chosen?.applicability.evidence, ["script suelto"]);
+      assert.equal(chosen?.rootPath, "/proyecto");
+    });
+
+    it("no acepta a un adaptador que no reclamó el proyecto", async () => {
+      const selection = await selectEcosystem([propuesto, otro, ajeno], CONTEXT);
+      assert.ok(selection.selected);
+
+      assert.equal(chooseEcosystem(selection.candidates, "ajeno", "/proyecto"), undefined);
+      assert.equal(chooseEcosystem(selection.candidates, "inventado", "/proyecto"), undefined);
+    });
+
+    it("sin elección guardada no cambia nada", async () => {
+      const selection = await selectEcosystem([propuesto, otro], CONTEXT);
+      assert.ok(selection.selected);
+
+      assert.equal(chooseEcosystem(selection.candidates, undefined, "/proyecto"), undefined);
+    });
   });
 
   it("conserva la evidencia de quien se declaró no aplicable", async () => {

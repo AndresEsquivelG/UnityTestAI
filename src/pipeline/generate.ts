@@ -111,7 +111,7 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
   // extraigan las plantillas.
   const outputRoot = project.rootPath;
 
-  emit({ kind: "generationStarted" });
+  emit({ kind: "generationStarted", outputRoot });
 
   // ── OP-05: localización de la unidad bajo prueba ─────────────────────────
   const target: UnitTarget = { className, methodName };

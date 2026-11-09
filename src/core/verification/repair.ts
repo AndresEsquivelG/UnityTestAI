@@ -42,9 +42,11 @@ export const MAX_REPAIR_CYCLES = 3;
 
 /**
  * Errores que se le pasan al corrector como máximo. Un archivo roto de raíz
- * puede producir cientos de errores en cascada que no le agregan nada.
+ * puede producir cientos de errores en cascada que no le agregan nada, pero una
+ * subclase a la que le faltan los miembros de una clase abstracta da uno por
+ * miembro, y el corrector necesita verlos todos: en un caso real fueron 28.
  */
-const MAX_FED_ERRORS = 20;
+const MAX_FED_ERRORS = 40;
 
 /** Por qué terminó la corrección automática. */
 export type RepairStop =

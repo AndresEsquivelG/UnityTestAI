@@ -6,6 +6,9 @@
  * modelo y escucha sus avisos. Punto de entrada único.
  */
 
+export { archiveRun } from "./archive";
+export type { RunArchiveRequest } from "./archive";
+
 export { generateTest } from "./generate";
 export type { EditorSelection, GeneratedTest, GenerationRequest } from "./generate";
 

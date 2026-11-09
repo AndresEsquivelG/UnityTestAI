@@ -1,7 +1,8 @@
 import * as fsp from "fs/promises";
 import * as path from "path";
-import type { ProjectModel, SourceFile, UnitTarget } from "../../core/contracts";
-import { findMethodExtents, findTypeBodies, maskCommentsAndStrings } from "./csharpSource";
+import type { ProjectModel, UnitTarget } from "../../core/contracts";
+import { NOT_A_TYPE_NAME, findMethodExtents, findTypeBodies, maskCommentsAndStrings } from "./csharpSource";
+import { isProjectCode } from "./projectTypes";
 
 /**
  * OP-17 — Archivos del proyecto que declaran los tipos que usa un código.
@@ -32,19 +33,6 @@ const TYPE_DECLARATION =
 
 const IDENTIFIER = /[A-Za-z_]\w*/g;
 
-/**
- * Palabras que pueden seguir a `class` o `struct` sin ser un nombre, como en
- * las restricciones `where T : class` seguidas de otra cláusula `where`.
- */
-const NOT_A_TYPE_NAME = new Set(["where", "new", "unmanaged", "notnull"]);
-
-/**
- * Carpeta que Unity compila aparte, antes que el resto, y que por convención
- * guarda código de terceros. El agente resolutor tiene la orden de ignorar
- * los tipos de terceros; la detección sigue la misma regla.
- */
-const THIRD_PARTY_FOLDER = "Plugins";
-
 export async function detectUnityDependencies(
   project: ProjectModel,
   code: string,
@@ -65,7 +53,9 @@ export async function detectUnityDependencies(
 
   const dependencies: string[] = [];
   for (const source of project.sources) {
-    if (!isCandidate(source)) {
+    // Una prueba no es dependencia del código que prueba, y el agente resolutor
+    // tiene la orden de ignorar los tipos de terceros: aquí, la misma regla.
+    if (!isProjectCode(source)) {
       continue;
     }
     let content: string;
@@ -108,18 +98,6 @@ function focusedText(masked: string, original: string, focus: UnitTarget | undef
     return masked;
   }
   return extents.map((extent) => masked.slice(extent.start, extent.end)).join("\n");
-}
-
-/**
- * Solo el código principal: una prueba no es dependencia del código que
- * prueba, y el código de terceros queda afuera por la misma regla que sigue
- * el agente.
- */
-function isCandidate(source: SourceFile): boolean {
-  return (
-    source.sourceRoot === "main" &&
-    !source.relativePath.split("/").includes(THIRD_PARTY_FOLDER)
-  );
 }
 
 /** Nombres de los tipos declarados en un código ya enmascarado. */

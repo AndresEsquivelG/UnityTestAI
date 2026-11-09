@@ -4,7 +4,7 @@ import * as fsp from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import { UnityAdapter } from "../adapters/unity/unityAdapter";
-import { parseUnityCompilerLog } from "../adapters/unity/compilation";
+import { explainMissingTypes, parseUnityCompilerLog } from "../adapters/unity/compilation";
 import {
   editorCandidates,
   systemEditorToolchain,
@@ -153,6 +153,127 @@ describe("compilación del proyecto Unity (OP-13)", () => {
       ].join("\n");
 
       assert.deepEqual(parseUnityCompilerLog(log, "C:/Proyectos/Juego"), []);
+    });
+  });
+
+  describe("pista del espacio de nombres para el corrector", () => {
+    let root: string;
+
+    const error = (code: string, message: string, filePath = ARTIFACT) => ({
+      filePath,
+      line: 3,
+      column: 1,
+      severity: "error" as const,
+      code,
+      message,
+    });
+    const missingType = (name: string) =>
+      error(
+        "CS0246",
+        `The type or namespace name '${name}' could not be found (are you missing a using directive or an assembly reference?)`
+      );
+
+    const proyecto = async (archivos: Record<string, string>): Promise<ProjectModel> => {
+      for (const [relativo, contenido] of Object.entries(archivos)) {
+        await fsp.mkdir(path.dirname(path.join(root, relativo)), { recursive: true });
+        await fsp.writeFile(path.join(root, relativo), contenido, "utf8");
+      }
+      return {
+        rootPath: root,
+        ecosystemId: "unity",
+        sourceRoots: [{ relativePath: "Assets", kind: "main" }],
+        sources: Object.keys(archivos).map((relativePath) => ({
+          relativePath,
+          name: path.basename(relativePath),
+          sourceRoot: "main" as const,
+        })),
+      } as ProjectModel;
+    };
+
+    before(async () => {
+      root = await fsp.mkdtemp(path.join(os.tmpdir(), "utia-pista-"));
+    });
+    after(async () => {
+      await fsp.rm(root, { recursive: true, force: true });
+    });
+
+    const SKELETON = "namespace RedRunner\n{\n    public class Skeleton { }\n}\n";
+
+    it("dice dónde declara el proyecto el tipo que falta (CS0246)", async () => {
+      const [diagnostico] = explainMissingTypes(
+        [missingType("Skeleton")],
+        await proyecto({ "Assets/Skeleton.cs": SKELETON }),
+        ARTIFACT
+      );
+      assert.match(diagnostico.message, /could not be found.*add `using RedRunner;`\.$/);
+    });
+
+    it("también con un tipo genérico y con un nombre suelto (CS0103)", async () => {
+      const modelo = await proyecto({
+        "Assets/Skeleton.cs": SKELETON,
+        "Assets/Property.cs": "namespace RedRunner.Utilities\n{\n    public class Property<T> { }\n}\n",
+      });
+      const [generico, suelto] = explainMissingTypes(
+        [
+          missingType("Property<>"),
+          error("CS0103", "The name 'Skeleton' does not exist in the current context"),
+        ],
+        modelo,
+        ARTIFACT
+      );
+      assert.match(generico.message, /add `using RedRunner\.Utilities;`/);
+      assert.match(suelto.message, /add `using RedRunner;`/);
+    });
+
+    it("no toca los errores de otros archivos ni otros códigos", async () => {
+      const entrada = [
+        missingType("Skeleton"),
+        error("CS1002", "; expected"),
+      ];
+      const fuera = { ...entrada[0], filePath: "Assets/Otro.cs" };
+      const [ajeno, otroCodigo] = explainMissingTypes(
+        [fuera, entrada[1]],
+        await proyecto({ "Assets/Skeleton.cs": SKELETON }),
+        ARTIFACT
+      );
+      assert.equal(ajeno.message, fuera.message);
+      assert.equal(otroCodigo.message, "; expected");
+    });
+
+    it("sin ningún tipo del proyecto con ese nombre, deja el error como está", async () => {
+      const original = missingType("NoExiste");
+      const [diagnostico] = explainMissingTypes(
+        [original],
+        await proyecto({ "Assets/Skeleton.cs": SKELETON }),
+        ARTIFACT
+      );
+      assert.equal(diagnostico.message, original.message);
+    });
+
+    it("con el nombre en dos espacios de nombres no elige", async () => {
+      const original = missingType("Skeleton");
+      const [diagnostico] = explainMissingTypes(
+        [original],
+        await proyecto({
+          "Assets/Skeleton.cs": SKELETON,
+          "Assets/Otro.cs": "namespace Otro\n{\n    public class Skeleton { }\n}\n",
+        }),
+        ARTIFACT
+      );
+      assert.equal(diagnostico.message, original.message);
+      await fsp.rm(path.join(root, "Assets/Otro.cs"));
+    });
+
+    it("con un tipo anidado no sugiere un using que no alcanzaría", async () => {
+      const original = missingType("Interna");
+      const [diagnostico] = explainMissingTypes(
+        [original],
+        await proyecto({
+          "Assets/Afuera.cs": "namespace A\n{\n    public class Afuera { public class Interna { } }\n}\n",
+        }),
+        ARTIFACT
+      );
+      assert.equal(diagnostico.message, original.message);
     });
   });
 

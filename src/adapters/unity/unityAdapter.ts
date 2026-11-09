@@ -50,8 +50,9 @@ export interface UnityAdapterOptions {
  * operaciones obligatorias y seis de las siete opcionales: OP-09; OP-13,
  * OP-14 y OP-15, que compilan el proyecto, ejecutan la prueba y miden su
  * cobertura con el editor de Unity en modo batch; OP-17, que detecta los
- * tipos del proyecto que usa la unidad, y OP-18, que dice en qué espacio de
- * nombres está la clase.
+ * tipos del proyecto que usa la unidad, y OP-18, la ficha con lo que los
+ * agentes no deberían adivinar: espacio de nombres, constructores, llamadas y
+ * dependencias abstractas.
  *
  * El ciclo de vida se declara en falso porque hoy es cierto: no hay
  * artefactos temporales que preparar ni limpiar. Cuando los haya, esta
@@ -113,8 +114,13 @@ export class UnityAdapter implements EcosystemAdapter {
     return detectUnityDependencies(project, code, focus);
   }
 
-  describeUnit(code: string, target: UnitTarget, location: SymbolCandidate): string {
-    return describeUnityUnit(code, target, location);
+  describeUnit(
+    code: string,
+    target: UnitTarget,
+    location: SymbolCandidate,
+    project: ProjectModel
+  ): string {
+    return describeUnityUnit(code, target, location, project);
   }
 
   getPromptProfile(project: ProjectModel): PromptProfile {

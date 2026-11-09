@@ -34,7 +34,11 @@ export interface CoverageReportFile {
  */
 export type PipelineEvent =
   /** Empezó una generación: lo que mostraba la anterior ya no vale. */
-  | { readonly kind: "generationStarted" }
+  | {
+      readonly kind: "generationStarted";
+      /** La raíz donde los agentes dejan `AgentOutputs`. */
+      readonly outputRoot: string;
+    }
   | {
       readonly kind: "agent";
       readonly agent: string;

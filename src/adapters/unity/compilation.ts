@@ -14,6 +14,7 @@ import {
   type BatchActivity,
 } from "./batch";
 import type { EditorRunResult, UnityEditorToolchain } from "./editor";
+import { ProjectTypes, uniqueNamespace } from "./projectTypes";
 
 /**
  * OP-13 — Compilación del proyecto Unity con la prueba ya escrita.
@@ -77,16 +78,17 @@ export async function compileUnityProject(
       logFile,
     ],
     options.timeoutMs ?? COMPILE_TIMEOUT_MS,
-    async (run, log) => classifyRun(run, log, project.rootPath, artifactPath)
+    async (run, log) => classifyRun(run, log, project, artifactPath)
   );
 }
 
 function classifyRun(
   run: EditorRunResult,
   log: string,
-  rootPath: string,
+  project: ProjectModel,
   artifactPath: string
 ): VerificationResult {
+  const { rootPath } = project;
   const blocker = batchBlocker(run, log, COMPILE);
   if (blocker) {
     return notRun(blocker, log);
@@ -110,7 +112,12 @@ function classifyRun(
   if (errors.length > 0) {
     // Los errores se conservan todos, estén donde estén: un error en el código
     // del proyecto también impide compilar la prueba.
-    return { status: "failed", diagnostics: errors, exitCode, rawOutput: log };
+    return {
+      status: "failed",
+      diagnostics: explainMissingTypes(errors, project, artifactPath),
+      exitCode,
+      rawOutput: log,
+    };
   }
 
   return notRun(
@@ -158,6 +165,45 @@ export function parseUnityCompilerLog(log: string, rootPath: string): Diagnostic
   }
 
   return diagnostics;
+}
+
+/** Los dos errores con los que C# dice que no conoce un nombre. */
+const UNKNOWN_NAME: readonly RegExp[] = [
+  /^The type or namespace name '([A-Za-z_]\w*)(?:<[^']*>)?' could not be found/,
+  /^The name '([A-Za-z_]\w*)' does not exist in the current context/,
+];
+
+/**
+ * Le suma a un error de la prueba por un nombre desconocido dónde lo declara el
+ * proyecto. El corrector recibe el mismo contexto recortado que el generador: sin
+ * esto no tiene de dónde sacar el `using`, y ya pasó que probó otras cosas, como
+ * buscar el tipo por nombre, que después fallan al ejecutar.
+ */
+export function explainMissingTypes(
+  diagnostics: readonly Diagnostic[],
+  project: ProjectModel,
+  artifactPath: string
+): Diagnostic[] {
+  const unknownName = (diagnostic: Diagnostic): string | undefined =>
+    samePath(diagnostic.filePath, artifactPath)
+      ? UNKNOWN_NAME.map((pattern) => pattern.exec(diagnostic.message)?.[1]).find(Boolean)
+      : undefined;
+
+  if (!diagnostics.some(unknownName)) {
+    return [...diagnostics];
+  }
+
+  const types = new ProjectTypes(project);
+  return diagnostics.map((diagnostic) => {
+    const name = unknownName(diagnostic);
+    const namespace = name && uniqueNamespace(types.find(name));
+    return namespace
+      ? {
+          ...diagnostic,
+          message: `${diagnostic.message} The project declares \`${name}\` in namespace ${namespace}: add \`using ${namespace};\`.`,
+        }
+      : diagnostic;
+  });
 }
 
 function toProjectRelative(file: string, rootPath: string): string {

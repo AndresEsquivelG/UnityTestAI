@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as dotenv from "dotenv";
-import { createWebviewPanel } from "./webview/webviewManager";
-import { AdapterRegistry, selectEcosystem } from "./core/adapters";
+import { CHOSEN_ECOSYSTEM_KEY, createWebviewPanel } from "./webview/webviewManager";
+import { AdapterRegistry, chooseEcosystem, selectEcosystem } from "./core/adapters";
 import type { DetectionContext } from "./core/contracts";
 import { UnityAdapter } from "./adapters/unity/unityAdapter";
 import { JavaAdapter } from "./adapters/java/javaAdapter";
@@ -74,19 +74,27 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      if (selection.ambiguous) {
-        // Se elige de todos modos, por orden de registro, pero conviene saberlo:
-        // este es el caso que justifica el selector manual de ecosistema.
+      // Lo que la persona fijó antes en este proyecto manda sobre lo propuesto.
+      const chosen = chooseEcosystem(
+        selection.candidates,
+        context.workspaceState.get<string>(CHOSEN_ECOSYSTEM_KEY),
+        selection.active.rootPath,
+      );
+
+      if (selection.ambiguous && !chosen) {
+        // Se propone uno de todos modos, por orden de registro, pero conviene
+        // saberlo: quizá haya que cambiarlo en el panel.
         vscode.window.showWarningMessage(
           `Más de un ecosistema reclama el proyecto con la misma confianza. ` +
-            `Se usará "${selection.active.adapter.descriptor.displayName}".`,
+            `Se propone "${selection.active.adapter.descriptor.displayName}"; se puede cambiar en el panel.`,
         );
       }
 
       await createWebviewPanel(
         context,
         { code: document.getText(), path: document.uri.fsPath },
-        selection.active,
+        chosen ?? selection.active,
+        selection.candidates,
       );
     },
   );

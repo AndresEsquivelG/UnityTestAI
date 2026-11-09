@@ -12,7 +12,7 @@ import {
 } from "../llm";
 import { artifactModelId, CLAUDE_MODELS, OPENAI_MODELS, type ModelChoice } from "../llm/models";
 import { DEFAULT_OLLAMA_MODEL, listOllamaModels } from "../llm/ollamaModels";
-import type { ActiveEcosystem } from "../core/adapters";
+import { chooseEcosystem, type ActiveEcosystem, type EcosystemCandidate } from "../core/adapters";
 import type { PreconditionFix } from "../core/contracts";
 import { applyPreconditionFix, readArtifact, UnmetPreconditions } from "../core/project";
 import {
@@ -21,6 +21,7 @@ import {
   type VerificationOutcome,
 } from "../core/verification";
 import {
+  archiveRun,
   checkExistingTest,
   checkGeneratedTest,
   findExistingTest,
@@ -35,6 +36,9 @@ import {
 } from "../pipeline";
 import { runChatFixer } from "../agents/chatFixer";
 import { saveAgentOutput } from "../agents/agentOutputSaver";
+
+/** Dónde se recuerda, por proyecto, el ecosistema que la persona fijó. */
+export const CHOSEN_ECOSYSTEM_KEY = "unityTestIA.chosenEcosystem";
 
 // ── Per-panel state ────────────────────────────────────────────────────────────
 
@@ -487,6 +491,10 @@ async function handleGenerate(
   const generationStart = Date.now();
   tokenTotalsByPanel.set(panel, { inputTokens: 0, outputTokens: 0 });
 
+  const modelId = artifactModelId(model, chosen);
+  let outputRoot: string | undefined;
+  let testFile: string | undefined;
+
   try {
     const provider = modelProviders[model];
     if (!provider) throw new Error(`Modelo no válido: ${model}`);
@@ -496,13 +504,19 @@ async function handleGenerate(
       rootPath: ecosystem.rootPath,
       className,
       methodName,
-      modelId: artifactModelId(model, chosen),
+      modelId,
       reduceContext,
       editor,
       ignorePreconditions,
       ask: (prompt, options) => askOnce(provider, prompt, panel, chosen, options),
-      onEvent: (event) => showPipelineEvent(panel, event),
+      onEvent: (event) => {
+        if (event.kind === "generationStarted") {
+          outputRoot = event.outputRoot;
+        }
+        showPipelineEvent(panel, event);
+      },
     });
+    testFile = test.savedPath;
 
     // Store test context for ChatFixer
     testContextByPanel.set(panel, test);
@@ -532,6 +546,16 @@ async function handleGenerate(
     }
     panel.webview.postMessage({ command: "agentError", message: err.message });
     vscode.window.showErrorMessage("Error al generar: " + err.message);
+  } finally {
+    // Al final de todo, para llevarse también la verificación, la ejecución y la
+    // cobertura. Que la copia falle no le quita validez a la corrida.
+    if (outputRoot) {
+      try {
+        archiveRun({ outputRoot, startedAt: generationStart, modelId, className, methodName, testFile });
+      } catch (err: any) {
+        vscode.window.showWarningMessage("No se pudo guardar la copia de esta corrida: " + err.message);
+      }
+    }
   }
 }
 
@@ -650,7 +674,8 @@ async function handleRunExisting(
 export async function createWebviewPanel(
   context: vscode.ExtensionContext,
   editor: EditorSelection,
-  ecosystem: ActiveEcosystem,
+  initialEcosystem: ActiveEcosystem,
+  candidates: readonly EcosystemCandidate[],
 ) {
   const panel = vscode.window.createWebviewPanel(
     "unityTestIAView",
@@ -671,16 +696,38 @@ export async function createWebviewPanel(
   // cerrado, y el panel tiene que ir cargando mientras tanto.
   const menu = buildModelMenu();
 
-  // Ecosistema detectado, para que la interfaz diga contra qué se va a generar.
+  let ecosystem = initialEcosystem;
+
+  // Se fija al empezar a generar o a medir: verificar, reintentar y el corrector
+  // trabajan sobre la prueba que dejó ese adaptador, y otro no sabría leerla.
+  let ecosystemLocked = false;
+
+  // Ecosistema activo, para que la interfaz diga contra qué se va a generar.
   // Sale del descriptor (OP-01) y de la evidencia de la detección (OP-02): el
   // núcleo no compone el texto ni pregunta por el identificador.
-  const ecosystemInfo = {
+  const ecosystemInfo = () => ({
+    id: ecosystem.adapter.descriptor.id,
     displayName: ecosystem.adapter.descriptor.displayName,
     version: ecosystem.adapter.descriptor.version,
     confidence: ecosystem.applicability.confidence,
     evidence: ecosystem.applicability.evidence,
     // Con esto el panel deja vacía la clase: una función sin clase.
     moduleLevelUnits: ecosystem.adapter.capabilities.moduleLevelUnits,
+    // Con una sola candidata no hay nada que elegir y queda la insignia.
+    choices: candidates.map(({ adapter, applicability }) => ({
+      id: adapter.descriptor.id,
+      displayName: adapter.descriptor.displayName,
+      confidence: applicability.confidence,
+    })),
+    locked: ecosystemLocked,
+  });
+  const showEcosystem = () =>
+    panel.webview.postMessage({ command: "setEcosystem", ecosystem: ecosystemInfo() });
+  const lockEcosystem = () => {
+    if (!ecosystemLocked) {
+      ecosystemLocked = true;
+      showEcosystem();
+    }
   };
 
   const uiPath = path.join(context.extensionPath, "ui", "index.html");
@@ -707,13 +754,27 @@ export async function createWebviewPanel(
   void menu.then((models) =>
     panel.webview.postMessage({ command: "setModels", models }),
   );
-  panel.webview.postMessage({
-    command: "setEcosystem",
-    ecosystem: ecosystemInfo,
-  });
+  showEcosystem();
 
   panel.webview.onDidReceiveMessage(async (message) => {
     switch (message.command) {
+      case "changeEcosystem": {
+        const chosen = ecosystemLocked
+          ? undefined
+          : chooseEcosystem(candidates, message.adapterId, ecosystem.rootPath);
+        if (chosen) {
+          ecosystem = chosen;
+          // Volver a lo propuesto borra la elección: lo fijado solo manda si difiere.
+          await context.workspaceState.update(
+            CHOSEN_ECOSYSTEM_KEY,
+            chosen.adapter === candidates[0]?.adapter ? undefined : chosen.adapter.descriptor.id,
+          );
+        }
+        // También si no se aceptó: el menú tiene que volver a lo que está activo.
+        showEcosystem();
+        break;
+      }
+
       case "validateInputs": {
         const { className, methodName } = await collectClassAndMethod(panel);
 
@@ -770,10 +831,7 @@ export async function createWebviewPanel(
       }
 
       case "webviewReady": {
-        panel.webview.postMessage({
-          command: "setEcosystem",
-          ecosystem: ecosystemInfo,
-        });
+        showEcosystem();
         panel.webview.postMessage({ command: "setModels", models: await menu });
         break;
       }
@@ -784,6 +842,7 @@ export async function createWebviewPanel(
         // sería recorrer el proyecto dos veces.
         const { methodName, model, subModel } = message;
         const reduceContext = message.reduceContext !== false;
+        lockEcosystem();
         await handleGenerate(
           classNameOf(message.className),
           methodName,
@@ -800,6 +859,7 @@ export async function createWebviewPanel(
       case "generateTest": {
         const { className, methodName } = await collectClassAndMethod(panel);
         const reduceContext = message.reduceContext !== false;
+        lockEcosystem();
         await handleGenerate(
           className,
           methodName,
@@ -815,6 +875,7 @@ export async function createWebviewPanel(
 
       case "runExistingTest": {
         const { className, methodName } = await collectClassAndMethod(panel);
+        lockEcosystem();
         await handleRunExisting(
           className,
           methodName,
