@@ -16,6 +16,7 @@ import {
   TEST_RUN_STAGE_NAME,
   buildCoverageDocument,
   presentCoverage,
+  presentPendingPreconditions,
   presentRepairProgress,
   presentRepairResult,
   presentTestRun,
@@ -145,11 +146,20 @@ export async function checkGeneratedTest(request: CheckRequest): Promise<void> {
       force: true,
     });
 
+    // Se generó a pedido pese a los avisos. Mientras sigan pendientes no se corrige:
+    // el corrector no puede resolver lo que falta en el proyecto, y reescribiría la
+    // prueba por un error que no es suyo, gastando tokens. Se vuelve a comprobar en
+    // cada verificación: si la persona ya lo resolvió, la corrección vuelve a correr.
+    const pending = test.ignoredPreconditionsAt
+      ? await adapter.checkPreconditions(project, spec, test.ignoredPreconditionsAt)
+      : [];
+
     const result = await verifyAndRepair({
       adapter,
       project,
       spec,
       fix,
+      ...(pending.length > 0 ? { maxCycles: 0 } : {}),
       onEvent: (event) => {
         const fixerAgent = `Auto Fixer #${event.cycle}`;
         switch (event.kind) {
@@ -194,7 +204,12 @@ export async function checkGeneratedTest(request: CheckRequest): Promise<void> {
       ...record,
       finalStatus: outcome.status,
     });
-    showVerification(presentRepairResult(kind, result));
+    const presentation = presentRepairResult(kind, result);
+    showVerification(
+      pending.length > 0 && outcome.status !== "passed"
+        ? presentPendingPreconditions(presentation, pending)
+        : presentation,
+    );
     emit({ kind: "verified", status: outcome.status });
 
     // ── OP-14 y OP-15: ejecución y cobertura, con la prueba ya verificada ──

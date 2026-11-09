@@ -200,8 +200,9 @@ export function showVerificationRunning(stageName, panelId = "verificationPanel"
  *           diagnostics: { severity: string, location: string, code?: string, message: string }[] }} verification
  * @param {() => void} onRetry
  * @param {string} [panelId]
- * @param {{ label: string, run: () => void, once?: boolean }} [action] Botón propio de la etapa.
- *   Con `once` se desactiva al tocarlo: lo que hace no se puede pedir dos veces.
+ * @param {{ label: string, run: () => void, once?: boolean } | { label: string, run: () => void, once?: boolean }[]} [action]
+ *   Botón o botones propios de la etapa. Con `once`, tocarlo desactiva todos: cada uno
+ *   empieza algo que no se puede pedir dos veces ni junto con otro.
  */
 export function showVerification(verification, onRetry, panelId = "verificationPanel", action) {
   const panel = document.getElementById(panelId);
@@ -287,15 +288,17 @@ export function showVerification(verification, onRetry, panelId = "verificationP
     panel.appendChild(retry);
   }
 
-  if (action) {
+  const buttons = [];
+  for (const item of [].concat(action ?? [])) {
     const button = document.createElement("button");
     button.className = "verification__retry";
-    button.textContent = action.label;
+    button.textContent = item.label;
     button.addEventListener("click", () => {
-      if (action.once) button.disabled = true;
-      action.run();
+      if (item.once) buttons.forEach((other) => { other.disabled = true; });
+      item.run();
     });
     panel.appendChild(button);
+    buttons.push(button);
   }
 }
 

@@ -95,12 +95,18 @@ export interface PresentedTestCase {
 /** Los incumplimientos de OP-12 no son una etapa de verificación, pero se muestran igual. */
 const PRECONDITIONS_STAGE_NAME = "Antes de generar";
 
+/** Lo que se le pregunta a la persona junto con el botón para generar igual. */
+const GENERATE_ANYWAY_QUESTION =
+  "¿Querés generar la prueba igual? Gasta tokens y la prueba se escribe, pero puede no compilar hasta resolver esto, y mientras siga pendiente no se corrige sola.";
+
 /**
  * Lo que impide empezar a generar. Con uno solo se muestra como cualquier otro
- * aviso; con varios, cada uno en su renglón con su instrucción.
+ * aviso; con varios, cada uno en su renglón con su instrucción. La pregunta va al
+ * final, después de lo que hay que resolver.
  */
 export function presentUnmetPreconditions(
-  violations: readonly PreconditionViolation[]
+  violations: readonly PreconditionViolation[],
+  askToGenerateAnyway: boolean = false
 ): VerificationPresentation {
   const base = {
     stageName: PRECONDITIONS_STAGE_NAME,
@@ -108,13 +114,39 @@ export function presentUnmetPreconditions(
     retryable: false,
     diagnostics: [],
   };
+  const question = askToGenerateAnyway ? [GENERATE_ANYWAY_QUESTION] : [];
   if (violations.length === 1) {
-    return { ...base, summary: violations[0].message, remediation: violations[0].remediation };
+    return {
+      ...base,
+      summary: violations[0].message,
+      remediation: violations[0].remediation,
+      ...(question.length > 0 ? { details: question } : {}),
+    };
   }
   return {
     ...base,
     summary: `Hay ${violations.length} cosas por resolver.`,
-    details: violations.map((violation) => `${violation.message} → ${violation.remediation}`),
+    details: [
+      ...violations.map((violation) => `${violation.message} → ${violation.remediation}`),
+      ...question,
+    ],
+  };
+}
+
+/**
+ * La verificación de una prueba generada pese a los avisos, con lo que sigue
+ * pendiente. Reemplaza lo que diría la verificación sola: sus errores pueden venir
+ * de lo que falta y no de la prueba, y la instrucción útil es resolver eso.
+ */
+export function presentPendingPreconditions(
+  presentation: VerificationPresentation,
+  pending: readonly PreconditionViolation[]
+): VerificationPresentation {
+  const messages = pending.map((violation) => violation.message).join(" ");
+  return {
+    ...presentation,
+    note: `No se intentó corregirla sola: estos errores pueden venir de lo que sigue pendiente, no de la prueba. ${messages}`,
+    remediation: pending.map((violation) => violation.remediation).join(" "),
   };
 }
 

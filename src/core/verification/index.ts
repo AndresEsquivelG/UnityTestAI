@@ -6,6 +6,7 @@
  */
 
 export {
+  presentPendingPreconditions,
   presentPreconditionFixed,
   presentUnmetPreconditions,
   presentVerification,

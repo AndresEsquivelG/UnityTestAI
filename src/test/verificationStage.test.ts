@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ArtifactSpec, ProjectModel, VerificationResult } from "../core/contracts";
 import {
+  presentPendingPreconditions,
   presentPreconditionFixed,
   presentUnmetPreconditions,
   presentVerification,
@@ -179,6 +180,41 @@ describe("etapa de verificación", () => {
         "Falta otra cosa. → Instalala.",
       ]);
       assert.equal(presented.remediation, undefined);
+    });
+
+    it("con una, pregunta si se quiere generar igual, además de la instrucción", () => {
+      const presented = presentUnmetPreconditions([ONE], true);
+
+      assert.equal(presented.remediation, "Agregalo.");
+      assert.equal(presented.details?.length, 1);
+      assert.ok(presented.details?.[0].includes("generar la prueba igual"));
+    });
+
+    it("con varias, la pregunta va al final", () => {
+      const presented = presentUnmetPreconditions([ONE, TWO], true);
+
+      assert.equal(presented.details?.length, 3);
+      assert.ok(presented.details?.[2].includes("generar la prueba igual"));
+    });
+
+    it("sin pedirlo, no pregunta", () => {
+      assert.equal(presentUnmetPreconditions([ONE]).details, undefined);
+      assert.equal(presentUnmetPreconditions([ONE, TWO]).details?.length, 2);
+    });
+
+    it("lo que sigue pendiente reemplaza la instrucción, y conserva los errores", () => {
+      const verification = presentVerification("compile", {
+        status: "failed",
+        diagnostics: [{ filePath: "a.cs", line: 1, severity: "error", code: "E1", message: "Mal." }],
+        exitCode: 1,
+        rawOutput: "",
+      });
+
+      const presented = presentPendingPreconditions(verification, [ONE, TWO]);
+
+      assert.ok(presented.note?.includes("Falta algo. Falta otra cosa."));
+      assert.equal(presented.remediation, "Agregalo. Instalala.");
+      assert.equal(presented.diagnostics.length, 1);
     });
 
     it("el arreglo aplicado dice qué archivo se creó", () => {

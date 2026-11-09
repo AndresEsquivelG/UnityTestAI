@@ -99,7 +99,10 @@ const pendingFixByPanel = new WeakMap<
  * Repite la última generación con lo mismo que se pidió. Hace falta porque pudo
  * pedirse desde una configuración JSON, y entonces el formulario está vacío.
  */
-const repeatGenerationByPanel = new WeakMap<vscode.WebviewPanel, () => Promise<void>>();
+const repeatGenerationByPanel = new WeakMap<
+  vscode.WebviewPanel,
+  (ignorePreconditions: boolean) => Promise<void>
+>();
 
 const tokenTotalsByPanel = new WeakMap<
   vscode.WebviewPanel,
@@ -464,6 +467,7 @@ async function handleGenerate(
   reduceContext: boolean,
   panel: vscode.WebviewPanel,
   ecosystem: ActiveEcosystem,
+  ignorePreconditions: boolean = false,
 ) {
   if (verifyingPanels.has(panel)) {
     panel.webview.postMessage({ command: "generationError" });
@@ -473,8 +477,8 @@ async function handleGenerate(
     return;
   }
 
-  repeatGenerationByPanel.set(panel, () =>
-    handleGenerate(className, methodName, model, subModel, editor, reduceContext, panel, ecosystem),
+  repeatGenerationByPanel.set(panel, (ignore) =>
+    handleGenerate(className, methodName, model, subModel, editor, reduceContext, panel, ecosystem, ignore),
   );
 
   const chosen = chosenModel(model, subModel);
@@ -495,6 +499,7 @@ async function handleGenerate(
       modelId: artifactModelId(model, chosen),
       reduceContext,
       editor,
+      ignorePreconditions,
       ask: (prompt, options) => askOnce(provider, prompt, panel, chosen, options),
       onEvent: (event) => showPipelineEvent(panel, event),
     });
@@ -543,8 +548,9 @@ function showUnmetPreconditions(panel: vscode.WebviewPanel, unmet: UnmetPrecondi
   }
   panel.webview.postMessage({
     command: "showPreconditions",
-    verification: presentUnmetPreconditions(unmet.violations),
+    verification: presentUnmetPreconditions(unmet.violations, true),
     fixLabel: fix?.label,
+    canGenerateAnyway: true,
   });
 }
 
@@ -826,7 +832,7 @@ export async function createWebviewPanel(
         break;
 
       case "generateAgain":
-        await repeatGenerationByPanel.get(panel)?.();
+        await repeatGenerationByPanel.get(panel)?.(message.ignorePreconditions === true);
         break;
 
       case "verifyAgain":

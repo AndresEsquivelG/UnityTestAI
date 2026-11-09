@@ -31,7 +31,8 @@ export function artifactAbsolutePath(project: ProjectModel, spec: ArtifactSpec):
  * No crea la carpeta destino a propósito: que exista es una precondición del
  * ecosistema (OP-12), y en Unity crearla al vuelo no serviría de nada porque le
  * faltaría el archivo de definición de ensamblado. Crearla aquí convertiría un
- * incumplimiento con instrucción de subsanación en un fallo silencioso.
+ * incumplimiento con instrucción de subsanación en un fallo silencioso. Quien
+ * genera pese al aviso la crea aparte, con `ensureArtifactDirectory`.
  */
 export async function writeArtifact(
   project: ProjectModel,
@@ -41,6 +42,14 @@ export async function writeArtifact(
   const target = artifactAbsolutePath(project, spec);
   await fsp.writeFile(target, content, "utf8");
   return target;
+}
+
+/** Crea la carpeta del artefacto: la persona pidió generar aunque OP-12 avisó que faltaba. */
+export async function ensureArtifactDirectory(
+  project: ProjectModel,
+  spec: ArtifactSpec
+): Promise<void> {
+  await fsp.mkdir(path.dirname(artifactAbsolutePath(project, spec)), { recursive: true });
 }
 
 /**

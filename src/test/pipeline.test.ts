@@ -8,8 +8,13 @@ import {
   type Ask,
   type PipelineEvent,
 } from "../pipeline";
-import type { EcosystemAdapter } from "../core/contracts";
-import { UnmetPreconditions } from "../core/project";
+import type {
+  ArtifactSpec,
+  EcosystemAdapter,
+  PreconditionViolation,
+  ProjectModel,
+} from "../core/contracts";
+import { artifactRelativePath, UnmetPreconditions } from "../core/project";
 import { FictitiousAdapter } from "./support/fictitiousAdapter";
 import { createFictitiousFixture, type FictitiousFixture } from "./support/fictitiousFixture";
 
@@ -386,6 +391,156 @@ describe("pipeline entero sobre el adaptador ficticio", () => {
     });
 
     assert.match(seen ?? "", /calculadora/i);
+  });
+
+  describe("generar pese a los avisos", () => {
+    const AVISO = {
+      code: "ficticio.falta-algo",
+      message: "Falta algo en el proyecto.",
+      remediation: "Agregalo.",
+    };
+
+    /** El ficticio, con verificación, y con los incumplimientos que diga cada prueba. */
+    function adapterWith(
+      pending: () => readonly PreconditionViolation[],
+      status: "failed" | "passed" = "failed"
+    ): EcosystemAdapter {
+      const base = new FictitiousAdapter();
+      return Object.assign(Object.create(base), {
+        capabilities: { ...base.capabilities, verification: "compile" },
+        checkPreconditions: async () => pending(),
+        verifyArtifact: async (_project: ProjectModel, spec: ArtifactSpec) =>
+          status === "passed"
+            ? { status, diagnostics: [], exitCode: 0, rawOutput: "" }
+            : {
+                status,
+                diagnostics: [
+                  {
+                    filePath: artifactRelativePath(spec),
+                    line: 1,
+                    severity: "error",
+                    code: "E1",
+                    message: "No se encuentra el tipo.",
+                  },
+                ],
+                exitCode: 1,
+                rawOutput: "",
+              },
+      }) as EcosystemAdapter;
+    }
+
+    async function generateAndCheck(adapter: EcosystemAdapter) {
+      const model = scriptedModel();
+      const events: PipelineEvent[] = [];
+      const test = await generateTest({
+        adapter,
+        rootPath: fixture.projectRoot,
+        className: "Calculadora",
+        methodName: "sumar",
+        modelId: "libreto",
+        reduceContext: true,
+        ignorePreconditions: true,
+        ask: model.ask,
+      });
+      await checkGeneratedTest({
+        adapter,
+        test,
+        className: "Calculadora",
+        methodName: "sumar",
+        ask: model.ask,
+        tokenTotals: () => ({ inputTokens: 0, outputTokens: 0 }),
+        coverageTemplate: COVERAGE_TEMPLATE,
+        onEvent: (event) => events.push(event),
+      });
+      const shown = events.filter((event) => event.kind === "verification").at(-1);
+      assert.ok(shown?.kind === "verification");
+      const fixerAsked = events.some(
+        (event) => event.kind === "agent" && event.agent === "Auto Fixer #1"
+      );
+      return { presentation: shown.presentation, fixerAsked };
+    }
+
+    it("escribe la prueba aunque falte su carpeta, y la crea", async () => {
+      fs.rmSync(path.join(fixture.projectRoot, "pruebas"), { recursive: true });
+      const model = scriptedModel();
+
+      const test = await generateTest({
+        adapter: new FictitiousAdapter(),
+        rootPath: fixture.projectRoot,
+        className: "Calculadora",
+        methodName: "sumar",
+        modelId: "libreto",
+        reduceContext: true,
+        ignorePreconditions: true,
+        ask: model.ask,
+      });
+
+      assert.ok(fs.existsSync(test.savedPath));
+      assert.ok(model.calls.includes("Test Generator"));
+      assert.ok(test.ignoredPreconditionsAt?.filePath.toLowerCase().includes("calculadora"));
+    });
+
+    it("sin pedirlo no marca nada", async () => {
+      const test = await generateTest({
+        adapter: new FictitiousAdapter(),
+        rootPath: fixture.projectRoot,
+        className: "Calculadora",
+        methodName: "sumar",
+        modelId: "libreto",
+        reduceContext: true,
+        ask: scriptedModel().ask,
+      });
+
+      assert.equal(test.ignoredPreconditionsAt, undefined);
+    });
+
+    it("si un agente falla antes de escribir, no deja la carpeta creada", async () => {
+      fs.rmSync(path.join(fixture.projectRoot, "pruebas"), { recursive: true });
+      const script = SCRIPT.map((line) =>
+        line.agent === "Dependency Resolver" ? { ...line, response: "no es JSON" } : line
+      );
+
+      await assert.rejects(
+        generateTest({
+          adapter: new FictitiousAdapter(),
+          rootPath: fixture.projectRoot,
+          className: "Calculadora",
+          methodName: "sumar",
+          modelId: "libreto",
+          reduceContext: true,
+          ignorePreconditions: true,
+          ask: scriptedModel(script).ask,
+        }),
+        /Dependency Resolver failed/
+      );
+
+      assert.equal(fs.existsSync(path.join(fixture.projectRoot, "pruebas")), false);
+    });
+
+    it("mientras sigue pendiente no llama al corrector, y dice por qué", async () => {
+      const { presentation, fixerAsked } = await generateAndCheck(adapterWith(() => [AVISO]));
+
+      assert.equal(fixerAsked, false);
+      assert.equal(presentation.status, "failed");
+      assert.ok(presentation.note?.includes("No se intentó corregirla sola"));
+      assert.ok(presentation.note?.includes(AVISO.message));
+      assert.equal(presentation.remediation, AVISO.remediation);
+      assert.equal(presentation.diagnostics.length, 1);
+    });
+
+    it("si ya se resolvió, el corrector vuelve a correr", async () => {
+      const { presentation, fixerAsked } = await generateAndCheck(adapterWith(() => []));
+
+      assert.equal(fixerAsked, true);
+      assert.ok(!presentation.note?.includes("No se intentó"));
+    });
+
+    it("si compila igual, no dice que algo sigue pendiente", async () => {
+      const { presentation } = await generateAndCheck(adapterWith(() => [AVISO], "passed"));
+
+      assert.equal(presentation.status, "passed");
+      assert.equal(presentation.note, undefined);
+    });
   });
 
   it("si la unidad no existe, falla antes de la primera llamada al modelo", async () => {

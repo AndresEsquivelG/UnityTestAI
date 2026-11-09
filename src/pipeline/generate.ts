@@ -14,6 +14,7 @@ import type {
 } from "../core/contracts";
 import {
   dependencyLabel,
+  ensureArtifactDirectory,
   renderProjectTree,
   resolveDependencies,
   UnmetPreconditions,
@@ -56,6 +57,11 @@ export interface GenerationRequest {
    * unidad, y desempata entre funciones sin clase con el mismo nombre.
    */
   readonly editor?: EditorSelection;
+  /**
+   * Genera aunque OP-12 encuentre incumplimientos: la persona ya vio el aviso y
+   * pidió seguir. La carpeta de la prueba se crea si falta, para poder escribirla.
+   */
+  readonly ignorePreconditions?: boolean;
   readonly ask: Ask;
   readonly onEvent?: (event: PipelineEvent) => void;
 }
@@ -73,6 +79,11 @@ export interface GeneratedTest {
   readonly profile: PromptProfile;
   /** Archivo y unidad bajo prueba, sobre los que se mide la cobertura (OP-15). */
   readonly coverageTarget: CoverageTarget;
+  /**
+   * Solo si se generó pasando por alto OP-12: la declaración de la unidad, para
+   * volver a comprobar las precondiciones cada vez que se verifique.
+   */
+  readonly ignoredPreconditionsAt?: SymbolCandidate;
 }
 
 /**
@@ -120,9 +131,11 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
     targetLocation,
     modelId: request.modelId,
   });
-  const violations = await adapter.checkPreconditions(project, spec, targetLocation);
-  if (violations.length > 0) {
-    throw new UnmetPreconditions(project.rootPath, violations);
+  if (!request.ignorePreconditions) {
+    const violations = await adapter.checkPreconditions(project, spec, targetLocation);
+    if (violations.length > 0) {
+      throw new UnmetPreconditions(project.rootPath, violations);
+    }
   }
 
   // ── OP-06: código de la unidad ───────────────────────────────────────────
@@ -412,6 +425,10 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
     testResult.testCode,
     spec,
   );
+  // Recién aquí: si un agente falla antes, no queda una carpeta creada para nada.
+  if (request.ignorePreconditions) {
+    await ensureArtifactDirectory(project, spec);
+  }
   const savedPath = await writeArtifact(project, spec, finalTestCode);
 
   // ── Step 3.5: Test Validator ──────────────────────────────────────────────
@@ -458,6 +475,7 @@ export async function generateTest(request: GenerationRequest): Promise<Generate
     spec,
     profile,
     coverageTarget: { filePath: targetLocation.filePath, unit: target },
+    ...(request.ignorePreconditions ? { ignoredPreconditionsAt: targetLocation } : {}),
   };
 }
 

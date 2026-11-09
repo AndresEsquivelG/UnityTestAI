@@ -12,6 +12,7 @@ export {
   artifactAbsolutePath,
   artifactRelativePath,
   describeViolations,
+  ensureArtifactDirectory,
   readArtifact,
   UnmetPreconditions,
   writeArtifact,
